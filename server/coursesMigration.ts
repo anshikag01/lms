@@ -5,18 +5,40 @@ import {
   NEW_18_COURSES,
   SEED_VIDEO_MAP
 } from './seed18Courses';
-import { DatabaseState, Course, Section, Lesson, Review, Enrollment } from './types';
+import {
+  TECH_INSTRUCTORS,
+  NEW_16_TECH_COURSES,
+  SEED_TECH_VIDEO_MAP
+} from './seedTechCourses';
+import {
+  DatabaseState,
+  Course,
+  CertificateRecord
+} from './types';
+
+export function generateCertCode(year = 2026): string {
+  const chars = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ';
+  let rand = '';
+  for (let i = 0; i < 10; i++) {
+    rand += chars.charAt(Math.floor(Math.random() * chars.length));
+  }
+  return `LH-${year}-${rand}`;
+}
 
 export function migrateDatabase(state: DatabaseState): boolean {
   let modified = false;
 
-  // 1. Ensure chat arrays exist
+  // 1. Ensure chat & certificate arrays exist
   if (!state.chatSessions) {
     state.chatSessions = [];
     modified = true;
   }
   if (!state.chatMessages) {
     state.chatMessages = [];
+    modified = true;
+  }
+  if (!state.certificates) {
+    state.certificates = [];
     modified = true;
   }
 
@@ -28,8 +50,9 @@ export function migrateDatabase(state: DatabaseState): boolean {
     }
   }
 
-  // 3. Add any missing instructors
-  for (const inst of NEW_INSTRUCTORS) {
+  // 3. Add any missing instructors (from nonprog + tech)
+  const allNewInstructors = [...NEW_INSTRUCTORS, ...TECH_INSTRUCTORS];
+  for (const inst of allNewInstructors) {
     if (!state.users.some(u => u.id === inst.user.id)) {
       state.users.push(inst.user);
       modified = true;
@@ -57,10 +80,9 @@ export function migrateDatabase(state: DatabaseState): boolean {
     'Practical insights with zero fluff. One of the best investments of my time this month.'
   ];
 
-  // 4. Migrate the 18 new courses
+  // 4. Migrate the 18 new non-programming courses
   for (let cIdx = 0; cIdx < NEW_18_COURSES.length; cIdx++) {
     const bp = NEW_18_COURSES[cIdx];
-    // Check if course already exists
     let existingCourse = state.courses.find(c => c.slug === bp.slug);
     if (!existingCourse) {
       const courseId = `crs-nonprog-${cIdx + 101}`;
@@ -113,7 +135,7 @@ export function migrateDatabase(state: DatabaseState): boolean {
               videoType: 'youtube',
               durationMinutes: 10 + ((lessonNumber * 3) % 15),
               position: lessonNumber,
-              isFreePreview: lessonNumber === 1, // First lesson of every course is_free_preview = true
+              isFreePreview: lessonNumber === 1,
               resourcesUrl: 'https://learnhub.com/resources/starter-guide.pdf'
             });
           }
@@ -121,10 +143,10 @@ export function migrateDatabase(state: DatabaseState): boolean {
       });
 
       // Add 3-4 reviews per course
-      const numReviews = 3 + (cIdx % 2); // 3 or 4 reviews
+      const numReviews = 3 + (cIdx % 2);
       for (let rIdx = 0; rIdx < numReviews; rIdx++) {
         const studentId = studentIds[rIdx % studentIds.length];
-        const rating = rIdx === 1 ? 4 : 5; // mix of 4 and 5 star ratings
+        const rating = rIdx === 1 ? 4 : 5;
         const comment = reviewCommentsPool[(cIdx + rIdx) % reviewCommentsPool.length];
         const reviewId = `rev-${courseId}-${rIdx + 1}`;
 
@@ -139,7 +161,6 @@ export function migrateDatabase(state: DatabaseState): boolean {
           });
         }
 
-        // Ensure review author has an enrollment
         const enrId = `enr-${courseId}-${studentId}`;
         if (!state.enrollments.some(e => e.userId === studentId && e.courseId === courseId)) {
           state.enrollments.push({
@@ -148,12 +169,247 @@ export function migrateDatabase(state: DatabaseState): boolean {
             courseId,
             enrolledAt: new Date(Date.now() - (rIdx + 5) * 86400000).toISOString(),
             completedAt: rIdx === 0 ? new Date(Date.now() - 86400000).toISOString() : null,
-            certificateId: rIdx === 0 ? `CERT-LH-2026-${crypto.randomBytes(3).toString('hex').toUpperCase()}` : null
+            certificateId: null
           });
         }
       }
     }
   }
 
+  // 5. Migrate the 16 Tech Courses (Reaching 42+ courses total)
+  for (let tIdx = 0; tIdx < NEW_16_TECH_COURSES.length; tIdx++) {
+    const bp = NEW_16_TECH_COURSES[tIdx];
+    let existingCourse = state.courses.find(c => c.slug === bp.slug);
+    if (!existingCourse) {
+      const courseId = `crs-tech-${tIdx + 201}`;
+      const newCourse: Course = {
+        id: courseId,
+        title: bp.title,
+        slug: bp.slug,
+        shortDescription: bp.shortDescription,
+        description: bp.description,
+        thumbnailUrl: bp.thumbnailUrl,
+        categoryId: bp.categoryId,
+        level: bp.level,
+        price: bp.price,
+        language: bp.language,
+        whatYouWillLearn: bp.whatYouWillLearn,
+        requirements: bp.requirements,
+        status: 'published',
+        instructorId: bp.instructorId,
+        createdAt: new Date(Date.now() - (tIdx + 1) * 43200000).toISOString()
+      };
+      state.courses.push(newCourse);
+      modified = true;
+
+      // 3 sections x 4 lessons = 12 lessons
+      const videos = SEED_TECH_VIDEO_MAP[bp.slug] || [];
+      bp.sectionNames.forEach((secTitle, sIdx) => {
+        const sectionId = `sec-${courseId}-${sIdx + 1}`;
+        if (!state.sections.some(s => s.id === sectionId)) {
+          state.sections.push({
+            id: sectionId,
+            courseId,
+            title: secTitle,
+            position: sIdx + 1
+          });
+        }
+
+        const lessonTitles = bp.lessonTitles[sIdx] || [];
+        lessonTitles.forEach((lesTitle, lIdx) => {
+          const lessonNumber = sIdx * 4 + lIdx + 1;
+          const lessonId = `les-${courseId}-${lessonNumber}`;
+          const videoUrl = videos[lessonNumber - 1] || 'https://www.youtube.com/watch?v=SqcY0GlETPk';
+
+          if (!state.lessons.some(l => l.id === lessonId)) {
+            state.lessons.push({
+              id: lessonId,
+              sectionId,
+              title: lesTitle,
+              videoUrl,
+              videoType: 'youtube',
+              durationMinutes: 12 + ((lessonNumber * 2) % 18),
+              position: lessonNumber,
+              isFreePreview: lessonNumber === 1,
+              resourcesUrl: 'https://learnhub.com/resources/developer-starter-kit.zip'
+            });
+          }
+        });
+      });
+
+      // Reviews & Enrollments
+      const numReviews = 3 + (tIdx % 2);
+      for (let rIdx = 0; rIdx < numReviews; rIdx++) {
+        const studentId = studentIds[rIdx % studentIds.length];
+        const rating = rIdx === 2 ? 4 : 5;
+        const comment = reviewCommentsPool[(tIdx + rIdx + 2) % reviewCommentsPool.length];
+        const reviewId = `rev-${courseId}-${rIdx + 1}`;
+
+        if (!state.reviews.some(r => r.id === reviewId)) {
+          state.reviews.push({
+            id: reviewId,
+            userId: studentId,
+            courseId,
+            rating,
+            comment,
+            createdAt: new Date(Date.now() - (rIdx + 1) * 86400000).toISOString()
+          });
+        }
+
+        const enrId = `enr-${courseId}-${studentId}`;
+        if (!state.enrollments.some(e => e.userId === studentId && e.courseId === courseId)) {
+          state.enrollments.push({
+            id: enrId,
+            userId: studentId,
+            courseId,
+            enrolledAt: new Date(Date.now() - (rIdx + 3) * 86400000).toISOString(),
+            completedAt: rIdx === 0 ? new Date(Date.now() - 43200000).toISOString() : null,
+            certificateId: null
+          });
+        }
+      }
+
+      // Add 8-question Quiz for this tech course
+      const quizId = `quiz-${courseId}`;
+      if (!state.quizzes.some(q => q.id === quizId || q.courseId === courseId)) {
+        state.quizzes.push({
+          id: quizId,
+          courseId,
+          title: `${bp.title} Certification Exam`,
+          passPercentage: 75
+        });
+      }
+
+      bp.quizQuestions.forEach((qq, qIdx) => {
+        const questionId = `q-${courseId}-${qIdx + 1}`;
+        if (!state.quizQuestions.some(q => q.id === questionId)) {
+          state.quizQuestions.push({
+            id: questionId,
+            quizId,
+            question: qq.question,
+            options: qq.options,
+            correctIndex: qq.correctIndex,
+            explanation: qq.explanation
+          });
+        }
+      });
+    }
+  }
+
+  // 6. Ensure every course has a Quiz with at least 8 MCQs and explanations
+  for (const course of state.courses) {
+    let quiz = state.quizzes.find(q => q.courseId === course.id);
+    if (!quiz) {
+      quiz = {
+        id: `quiz-${course.id}`,
+        courseId: course.id,
+        title: `${course.title} Comprehensive Exam`,
+        passPercentage: 75
+      };
+      state.quizzes.push(quiz);
+      modified = true;
+    }
+
+    const existingQuestions = state.quizQuestions.filter(q => q.quizId === quiz!.id);
+    if (existingQuestions.length < 8) {
+      const needed = 8 - existingQuestions.length;
+      const genericTemplates = [
+        {
+          q: `What is the primary architectural principle emphasized in ${course.title}?`,
+          opts: ['Separation of concerns and modularity', 'Single file monolithic compilation', 'Random sampling without validation', 'Ignoring performance profiling'],
+          correct: 0,
+          exp: 'Modularity and separation of concerns allow systems to scale reliably while remaining testable.'
+        },
+        {
+          q: `Which best practice ensures high maintainability when working with ${course.title}?`,
+          opts: ['Adhering to standard style conventions and comprehensive documentation', 'Hardcoding secrets in source files', 'Skipping automated error logging', 'Disabling type safety checks'],
+          correct: 0,
+          exp: 'Adhering to consistent style conventions and clear documentation minimizes technical debt.'
+        },
+        {
+          q: `How do practitioners typically measure efficiency and outcomes in ${course.title}?`,
+          opts: ['By tracking measurable benchmarks and key performance metrics against baseline requirements', 'By measuring lines of code written per minute', 'By counting how many monitors the engineer uses', 'By guessing random numbers'],
+          correct: 0,
+          exp: 'Key performance metrics provide objective validation of operational outcomes and throughput.'
+        },
+        {
+          q: `What is a common pitfall that beginners encounter in ${course.title}?`,
+          opts: ['Neglecting edge cases and error handling during initial implementation', 'Using version control regularly', 'Writing unit tests too early', 'Reading official documentation'],
+          correct: 0,
+          exp: 'Failing to anticipate edge cases and boundary conditions leads to fragile systems in production.'
+        },
+        {
+          q: `In professional workflows for ${course.title}, why is automated testing critical?`,
+          opts: ['It detects regressions early in the development lifecycle before reaching production', 'It guarantees computers will never run out of memory', 'It replaces the need for design planning', 'It reduces network latency to zero'],
+          correct: 0,
+          exp: 'Automated testing builds a safety net that catches regressions as codebases evolve.'
+        },
+        {
+          q: `Which approach is recommended when troubleshooting complex failures in ${course.title}?`,
+          opts: ['Systematically isolating variables and inspecting telemetry logs', 'Deleting the entire codebase and starting over', 'Disabling all security firewalls', 'Ignoring user reports'],
+          correct: 0,
+          exp: 'Structured root cause analysis with telemetry isolation is the standard methodology for debugging.'
+        },
+        {
+          q: `What role does security and validation play in ${course.title}?`,
+          opts: ['It provides defensive protection by verifying all inputs and enforcing authorization boundaries', 'It is optional for internet-facing applications', 'It only matters during leap years', 'It is exclusively handled by web browsers'],
+          correct: 0,
+          exp: 'Defensive validation and explicit authorization boundaries guard against unauthorized access and data corruption.'
+        },
+        {
+          q: `What is the recommended strategy for continuous improvement in ${course.title}?`,
+          opts: ['Iterative refinement based on feedback and metric evaluation', 'Releasing once and never reviewing the implementation', 'Hiding release notes from stakeholders', 'Avoiding community peer reviews'],
+          correct: 0,
+          exp: 'Continuous iterative feedback loops drive steady enhancement and sustained reliability.'
+        }
+      ];
+
+      for (let i = 0; i < needed; i++) {
+        const t = genericTemplates[i % genericTemplates.length];
+        const qId = `q-${course.id}-${existingQuestions.length + i + 1}`;
+        state.quizQuestions.push({
+          id: qId,
+          quizId: quiz.id,
+          question: t.q,
+          options: t.opts,
+          correctIndex: t.correct,
+          explanation: t.exp
+        });
+        modified = true;
+      }
+    }
+  }
+
+  // 7. Backfill Certificates for Eligible Enrollments (Phase 4)
+  // Ensure certificate records exist in state.certificates with format LH-{YEAR}-{10 random chars}
+  for (const enr of state.enrollments) {
+    if (enr.completedAt) {
+      // Find or create certificate record
+      let certRecord = state.certificates.find(c => c.userId === enr.userId && c.courseId === enr.courseId);
+      if (!certRecord) {
+        const code = generateCertCode(2026);
+        certRecord = {
+          id: `cert-${crypto.randomUUID()}`,
+          code,
+          userId: enr.userId,
+          courseId: enr.courseId,
+          issuedAt: enr.completedAt,
+          revoked: false
+        };
+        state.certificates.push(certRecord);
+        enr.certificateId = code;
+        modified = true;
+      } else {
+        // Ensure code follows LH-2026-XXXXXXXXXX standard
+        if (!certRecord.code.startsWith('LH-')) {
+          certRecord.code = generateCertCode(2026);
+          modified = true;
+        }
+        enr.certificateId = certRecord.code;
+      }
+    }
+  }
+
   return modified;
 }
+

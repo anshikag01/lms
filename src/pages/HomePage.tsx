@@ -111,6 +111,24 @@ export const HomePage: React.FC = () => {
     return courses.filter(c => c.categoryId === 'cat-exam').slice(0, 4);
   }, [courses]);
 
+  // Curated Row 4: Trending Tech Courses
+  const trendingCourses = React.useMemo(() => {
+    if (!courses) return [];
+    return [...courses]
+      .sort((a, b) => {
+        const scoreB = (b.aggregates?.enrollmentCount ?? 0) * 2 + (b.aggregates?.ratingAverage ?? 0) * 10;
+        const scoreA = (a.aggregates?.enrollmentCount ?? 0) * 2 + (a.aggregates?.ratingAverage ?? 0) * 10;
+        return scoreB - scoreA;
+      })
+      .slice(0, 4);
+  }, [courses]);
+
+  // Curated Row 5: 100% Free Foundation Courses
+  const freeCourses = React.useMemo(() => {
+    if (!courses) return [];
+    return courses.filter(c => c.price === 0).slice(0, 4);
+  }, [courses]);
+
   return (
     <div className="flex flex-col min-h-screen">
       
@@ -515,6 +533,82 @@ export const HomePage: React.FC = () => {
               Array.from({ length: 4 }).map((_, i) => <CourseCardSkeleton key={i} />)
             ) : examCourses.length > 0 ? (
               examCourses.map((c) => <CourseCard key={c.id} course={c} />)
+            ) : (
+              <div className="col-span-4 text-center py-8 text-slate-500 text-xs">
+                Courses updating...
+              </div>
+            )}
+          </div>
+        </div>
+      </section>
+
+      {/* CURATED ROW 4: TRENDING COURSES */}
+      <section className="py-16 bg-white dark:bg-slate-900 border-t border-slate-200 dark:border-slate-800">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+          <div className="flex flex-col sm:flex-row sm:items-end justify-between mb-8">
+            <div>
+              <div className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-amber-100 dark:bg-amber-950/60 text-amber-700 dark:text-amber-300 text-xs font-semibold mb-2">
+                <TrendingUp className="w-3.5 h-3.5" />
+                <span>Most Active Learners</span>
+              </div>
+              <h2 className="text-2xl sm:text-3xl font-bold text-slate-900 dark:text-white">
+                Trending on LearnHub
+              </h2>
+              <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                Top rated and most popular courses being taken by students this week
+              </p>
+            </div>
+            <Link
+              to="/courses?sort=popular"
+              className="mt-3 sm:mt-0 text-xs font-semibold text-indigo-600 dark:text-indigo-400 hover:text-indigo-700 flex items-center gap-1"
+            >
+              View All Trending <ArrowRight className="w-3.5 h-3.5" />
+            </Link>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
+            {isCoursesLoading ? (
+              Array.from({ length: 4 }).map((_, i) => <CourseCardSkeleton key={i} />)
+            ) : trendingCourses.length > 0 ? (
+              trendingCourses.map((c) => <CourseCard key={c.id} course={c} />)
+            ) : (
+              <div className="col-span-4 text-center py-8 text-slate-500 text-xs">
+                Courses updating...
+              </div>
+            )}
+          </div>
+        </div>
+      </section>
+
+      {/* CURATED ROW 5: FREE FOUNDATION COURSES */}
+      <section className="py-16 bg-slate-50 dark:bg-slate-950 border-t border-slate-200 dark:border-slate-800">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+          <div className="flex flex-col sm:flex-row sm:items-end justify-between mb-8">
+            <div>
+              <div className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-emerald-100 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300 text-xs font-semibold mb-2">
+                <Award className="w-3.5 h-3.5" />
+                <span>Free Learning for Everyone</span>
+              </div>
+              <h2 className="text-2xl sm:text-3xl font-bold text-slate-900 dark:text-white">
+                Free Foundation Courses
+              </h2>
+              <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                High-quality full video masterclasses available completely free of charge with certificates
+              </p>
+            </div>
+            <Link
+              to="/courses?price=free"
+              className="mt-3 sm:mt-0 text-xs font-semibold text-emerald-600 dark:text-emerald-400 hover:text-emerald-700 flex items-center gap-1"
+            >
+              Browse Free Catalog <ArrowRight className="w-3.5 h-3.5" />
+            </Link>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
+            {isCoursesLoading ? (
+              Array.from({ length: 4 }).map((_, i) => <CourseCardSkeleton key={i} />)
+            ) : freeCourses.length > 0 ? (
+              freeCourses.map((c) => <CourseCard key={c.id} course={c} />)
             ) : (
               <div className="col-span-4 text-center py-8 text-slate-500 text-xs">
                 Courses updating...

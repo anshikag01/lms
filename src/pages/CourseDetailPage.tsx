@@ -545,10 +545,10 @@ export const CourseDetailPage: React.FC = () => {
                   ) : (
                     <div className="flex items-baseline gap-2">
                       <span className="text-3xl font-extrabold text-slate-900 dark:text-white font-mono tabular-nums">
-                        ${course.price.toFixed(2)}
+                        ₹{course.price.toLocaleString('en-IN')}
                       </span>
                       <span className="text-xs text-slate-400 line-through tabular-nums">
-                        ${(course.price * 1.5).toFixed(2)}
+                        ₹{Math.round(course.price * 1.5).toLocaleString('en-IN')}
                       </span>
                     </div>
                   )}

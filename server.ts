@@ -5,8 +5,8 @@ import { fileURLToPath } from 'url';
 import fs from 'fs';
 import crypto from 'crypto';
 import { GoogleGenAI } from '@google/genai';
-import { migrateDatabase } from './server/coursesMigration';
-import { ChatSession, ChatMessage } from './server/types';
+import { migrateDatabase, generateCertCode } from './server/coursesMigration';
+import { ChatSession, ChatMessage, CertificateRecord } from './server/types';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -157,6 +157,7 @@ export interface DatabaseState {
   notes: LessonNote[];
   chatSessions: ChatSession[];
   chatMessages: ChatMessage[];
+  certificates: CertificateRecord[];
 }
 
 const DATA_DIR = path.resolve(__dirname, 'data');
@@ -771,7 +772,8 @@ function getInitialSeedData(): DatabaseState {
     quizAttempts,
     notes,
     chatSessions: [],
-    chatMessages: []
+    chatMessages: [],
+    certificates: []
   };
   migrateDatabase(seedState);
   return seedState;
@@ -1039,6 +1041,24 @@ async function startServer() {
     });
   });
 
+  const resetTokens = new Map<string, { email: string; expiresAt: number }>();
+  const authRateLimits = new Map<string, { count: number; resetAt: number }>();
+
+  function checkAuthRateLimit(ipOrEmail: string): boolean {
+    const now = Date.now();
+    const windowMs = 5 * 60 * 1000; // 5 min
+    const record = authRateLimits.get(ipOrEmail);
+    if (!record || now > record.resetAt) {
+      authRateLimits.set(ipOrEmail, { count: 1, resetAt: now + windowMs });
+      return true;
+    }
+    if (record.count >= 20) {
+      return false;
+    }
+    record.count++;
+    return true;
+  }
+
   app.post('/api/auth/reset-password', (req: Request, res: Response) => {
     const { email } = req.body;
     if (!email) {
@@ -1046,13 +1066,49 @@ async function startServer() {
     }
     const state = db.getState();
     const user = state.users.find(u => u.email.toLowerCase() === email.toLowerCase());
-    // For privacy, we always return success message
+    
+    if (user) {
+      const token = crypto.randomBytes(20).toString('hex');
+      resetTokens.set(token, { email: user.email, expiresAt: Date.now() + 60 * 60 * 1000 });
+      console.log(`\n======================================================`);
+      console.log(`[AUTH RESET] Password reset requested for: ${user.email}`);
+      console.log(`[AUTH RESET] Link: http://localhost:3000/reset-password?token=${token}`);
+      console.log(`======================================================\n`);
+    }
+
     return res.json({
       success: true,
       message: user
-        ? `A secure password reset link has been dispatched to ${email}. Check your inbox.`
+        ? `A secure password reset link has been dispatched to ${email}. Check server logs in dev mode.`
         : `If an account exists for ${email}, a reset email has been sent.`
     });
+  });
+
+  app.post('/api/auth/reset-password-confirm', (req: Request, res: Response) => {
+    const { token, newPassword } = req.body;
+    if (!token || !newPassword) {
+      return res.status(400).json({ error: 'Token and new password are required.' });
+    }
+    if (newPassword.length < 6) {
+      return res.status(400).json({ error: 'Password must be at least 6 characters.' });
+    }
+
+    const resetData = resetTokens.get(token);
+    if (!resetData || Date.now() > resetData.expiresAt) {
+      return res.status(400).json({ error: 'Invalid or expired password reset token.' });
+    }
+
+    const state = db.getState();
+    const user = state.users.find(u => u.email.toLowerCase() === resetData.email.toLowerCase());
+    if (!user) {
+      return res.status(404).json({ error: 'User account not found.' });
+    }
+
+    user.passwordHash = hashPassword(newPassword);
+    resetTokens.delete(token);
+    db.save();
+
+    return res.json({ success: true, message: 'Password has been successfully updated. You may now log in.' });
   });
 
   app.put('/api/auth/change-password', requireAuth, (req: Request, res: Response) => {
@@ -1480,8 +1536,16 @@ async function startServer() {
       if (quizOk && !enrollment.completedAt) {
         enrollment.completedAt = new Date().toISOString();
         if (!enrollment.certificateId) {
-          const randHex = crypto.randomBytes(3).toString('hex').toUpperCase();
-          enrollment.certificateId = `CERT-LH-${new Date().getFullYear()}-${randHex}`;
+          const code = generateCertCode(new Date().getFullYear());
+          enrollment.certificateId = code;
+          state.certificates.push({
+            id: `cert-${crypto.randomUUID()}`,
+            code,
+            userId,
+            courseId,
+            issuedAt: enrollment.completedAt,
+            revoked: false
+          });
         }
         newlyCompleted = true;
       }
@@ -1572,6 +1636,20 @@ async function startServer() {
         user: profile
       }
     });
+  });
+
+  app.delete('/api/courses/:id/reviews', requireAuth, (req: Request, res: Response) => {
+    const courseId = req.params.id;
+    const userId = (req as any).userId;
+    const state = db.getState();
+
+    const idx = state.reviews.findIndex(r => r.userId === userId && r.courseId === courseId);
+    if (idx === -1) {
+      return res.status(404).json({ error: 'Review not found.' });
+    }
+    state.reviews.splice(idx, 1);
+    db.save();
+    return res.json({ success: true, message: 'Review removed successfully.' });
   });
 
   // -------------------------------------------------------------
@@ -1672,8 +1750,16 @@ async function startServer() {
       if (allCourseLessons.length > 0 && completedCount === allCourseLessons.length && !enrollment.completedAt) {
         enrollment.completedAt = new Date().toISOString();
         if (!enrollment.certificateId) {
-          const randHex = crypto.randomBytes(3).toString('hex').toUpperCase();
-          enrollment.certificateId = `CERT-LH-${new Date().getFullYear()}-${randHex}`;
+          const code = generateCertCode(new Date().getFullYear());
+          enrollment.certificateId = code;
+          state.certificates.push({
+            id: `cert-${crypto.randomUUID()}`,
+            code,
+            userId,
+            courseId: course.id,
+            issuedAt: enrollment.completedAt,
+            revoked: false
+          });
         }
       }
     }
@@ -1688,14 +1774,15 @@ async function startServer() {
   });
 
   // -------------------------------------------------------------
-  // CERTIFICATES (Public lookup)
+  // CERTIFICATES (Public lookup & Verification)
   // -------------------------------------------------------------
 
   app.get('/api/certificates/:certificateId', (req: Request, res: Response) => {
     const { certificateId } = req.params;
     const state = db.getState();
 
-    const enrollment = state.enrollments.find(e => e.certificateId === certificateId);
+    const certRecord = (state.certificates || []).find(c => c.code.toUpperCase() === certificateId.toUpperCase() || c.id === certificateId);
+    let enrollment = state.enrollments.find(e => e.certificateId === certificateId || (certRecord && e.userId === certRecord.userId && e.courseId === certRecord.courseId));
     if (!enrollment || !enrollment.completedAt) {
       return res.status(404).json({ error: 'Certificate not found or credential has not been issued.' });
     }
@@ -1704,17 +1791,110 @@ async function startServer() {
     const course = state.courses.find(c => c.id === enrollment.courseId);
     const instructorProfile = course ? state.profiles.find(p => p.id === course.instructorId) : null;
     const aggregates = course ? getCourseAggregates(course.id) : null;
+    const code = certRecord ? certRecord.code : enrollment.certificateId || certificateId;
 
     return res.json({
-      certificateId,
-      issuedAt: enrollment.completedAt,
+      certificateId: code,
+      code,
+      issuedAt: certRecord ? certRecord.issuedAt : enrollment.completedAt,
       studentName: studentProfile?.fullName || 'Distinguished Scholar',
       courseTitle: course?.title || 'Certified Curriculum',
       courseSlug: course?.slug || '',
       instructorName: instructorProfile?.fullName || 'LearnHub Faculty',
       totalDurationMinutes: aggregates?.totalDurationMinutes || 180,
-      totalLessons: aggregates?.totalLessons || 12
+      totalLessons: aggregates?.totalLessons || 12,
+      revoked: !!certRecord?.revoked,
+      revokedReason: certRecord?.revokedReason
     });
+  });
+
+  // Public Certificate Verification Endpoint (Phase 4)
+  app.get('/api/verify/:code', (req: Request, res: Response) => {
+    const { code } = req.params;
+    const state = db.getState();
+
+    const cleanCode = code.trim().toUpperCase();
+    const certRecord = (state.certificates || []).find(c => c.code.toUpperCase() === cleanCode || c.id === cleanCode);
+    const enrollment = state.enrollments.find(e => (e.certificateId && e.certificateId.toUpperCase() === cleanCode) || (certRecord && e.userId === certRecord.userId && e.courseId === certRecord.courseId));
+
+    if (!certRecord && (!enrollment || !enrollment.completedAt)) {
+      return res.status(404).json({
+        valid: false,
+        error: 'Certificate not found. This credential ID does not match any accredited records on LearnHub.'
+      });
+    }
+
+    const targetUserId = certRecord ? certRecord.userId : enrollment!.userId;
+    const targetCourseId = certRecord ? certRecord.courseId : enrollment!.courseId;
+    const studentProfile = state.profiles.find(p => p.id === targetUserId);
+    const course = state.courses.find(c => c.id === targetCourseId);
+    const instructorProfile = course ? state.profiles.find(p => p.id === course.instructorId) : null;
+    const aggregates = course ? getCourseAggregates(course.id) : null;
+
+    const isRevoked = !!certRecord?.revoked;
+
+    return res.json({
+      valid: !isRevoked,
+      code: certRecord ? certRecord.code : cleanCode,
+      issuedAt: certRecord ? certRecord.issuedAt : enrollment!.completedAt,
+      studentName: studentProfile?.fullName || 'Distinguished Student',
+      courseTitle: course?.title || 'Certified Curriculum',
+      courseSlug: course?.slug || '',
+      instructorName: instructorProfile?.fullName || 'LearnHub Faculty',
+      totalDurationMinutes: aggregates?.totalDurationMinutes || 180,
+      totalLessons: aggregates?.totalLessons || 12,
+      revoked: isRevoked,
+      revokedAt: certRecord?.revokedAt,
+      revokedReason: certRecord?.revokedReason || 'Revoked for administrative review.'
+    });
+  });
+
+  // Admin / Instructor Certificate Revocation & Restoration
+  app.put('/api/admin/certificates/:code/revoke', requireAuth, (req: Request, res: Response) => {
+    const { code } = req.params;
+    const { reason } = req.body;
+    const userId = (req as any).userId;
+    const state = db.getState();
+
+    const cert = (state.certificates || []).find(c => c.code.toUpperCase() === code.toUpperCase() || c.id === code);
+    if (!cert) return res.status(404).json({ error: 'Certificate record not found.' });
+
+    const course = state.courses.find(c => c.id === cert.courseId);
+    const isAdmin = hasRole(userId, 'admin');
+    const isInstructor = course?.instructorId === userId;
+    if (!isAdmin && !isInstructor) {
+      return res.status(403).json({ error: 'Unauthorized: Admin or Course Instructor privileges required.' });
+    }
+
+    cert.revoked = true;
+    cert.revokedAt = new Date().toISOString();
+    cert.revokedReason = reason || 'Revoked by administration for academic compliance review';
+    db.save();
+
+    return res.json({ success: true, message: 'Certificate has been revoked.', certificate: cert });
+  });
+
+  app.put('/api/admin/certificates/:code/restore', requireAuth, (req: Request, res: Response) => {
+    const { code } = req.params;
+    const userId = (req as any).userId;
+    const state = db.getState();
+
+    const cert = (state.certificates || []).find(c => c.code.toUpperCase() === code.toUpperCase() || c.id === code);
+    if (!cert) return res.status(404).json({ error: 'Certificate record not found.' });
+
+    const course = state.courses.find(c => c.id === cert.courseId);
+    const isAdmin = hasRole(userId, 'admin');
+    const isInstructor = course?.instructorId === userId;
+    if (!isAdmin && !isInstructor) {
+      return res.status(403).json({ error: 'Unauthorized: Admin or Course Instructor privileges required.' });
+    }
+
+    cert.revoked = false;
+    cert.revokedAt = undefined;
+    cert.revokedReason = undefined;
+    db.save();
+
+    return res.json({ success: true, message: 'Certificate has been restored.', certificate: cert });
   });
 
   // -------------------------------------------------------------
@@ -2110,8 +2290,15 @@ async function startServer() {
     return res.json({ success: true });
   });
 
-  // Database Reset Endpoint (Admin only)
+  // Database Reset Endpoint (Admin only with confirmation check)
   app.post('/api/admin/reset-database', requireAuth, requireRole('admin'), (req: Request, res: Response) => {
+    if (process.env.DEMO_MODE === 'false') {
+      return res.status(403).json({ error: 'Database reset is disabled in production.' });
+    }
+    const { confirmation } = req.body;
+    if (confirmation !== 'RESET') {
+      return res.status(400).json({ error: 'Type RESET to confirm database reset.' });
+    }
     db.resetToSeed();
     return res.json({ success: true, message: 'Database reset to initial verified seed state.' });
   });

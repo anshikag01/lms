@@ -128,8 +128,20 @@ export interface EnrolledCourseItem {
   nextLessonId?: string | null;
 }
 
+export interface CertificateRecord {
+  id: string;
+  code: string; // LH-YYYY-XXXXXXXXXX
+  userId: string;
+  courseId: string;
+  issuedAt: string;
+  revoked?: boolean;
+  revokedAt?: string;
+  revokedReason?: string;
+}
+
 export interface CertificateData {
   certificateId: string;
+  code?: string;
   issuedAt: string;
   studentName: string;
   courseTitle: string;
@@ -137,6 +149,8 @@ export interface CertificateData {
   instructorName: string;
   totalDurationMinutes: number;
   totalLessons: number;
+  revoked?: boolean;
+  revokedReason?: string;
 }
 
 export interface UserRole {

@@ -13,7 +13,8 @@ import {
   Quiz,
   QuizQuestion,
   QuizAttempt,
-  UserRole
+  UserRole,
+  CertificateRecord
 } from '../src/types';
 
 export interface User extends BaseUser {
@@ -34,7 +35,8 @@ export type {
   Quiz,
   QuizQuestion,
   QuizAttempt,
-  UserRole
+  UserRole,
+  CertificateRecord
 };
 
 export interface LessonProgress {
@@ -86,4 +88,5 @@ export interface DatabaseState {
   notes: LessonNote[];
   chatSessions: ChatSession[];
   chatMessages: ChatMessage[];
+  certificates: CertificateRecord[];
 }

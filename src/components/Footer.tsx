@@ -80,8 +80,8 @@ export const Footer: React.FC = () => {
                 </Link>
               </li>
               <li>
-                <Link to="/certificate/CERT-LH-2026-9812A" className="text-slate-400 hover:text-white transition-colors">
-                  Verify Certificate
+                <Link to="/verify" className="text-slate-400 hover:text-white transition-colors">
+                  Verify a Certificate
                 </Link>
               </li>
             </ul>

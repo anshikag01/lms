@@ -133,13 +133,39 @@ export const LessonPlayerPage: React.FC = () => {
     });
   };
 
-  // Convert YouTube standard URL to embed iframe URL
-  const getEmbedUrl = (url: string) => {
-    if (!url) return 'https://www.youtube.com/embed/SqcY0GlETPk';
-    if (url.includes('youtube.com/embed/')) return url;
-    const match = url.match(/(?:youtu\.be\/|youtube\.com\/(?:embed\/|v\/|watch\?v=|watch\?.+&v=))([\w-]{11})/);
-    return match ? `https://www.youtube.com/embed/${match[1]}?autoplay=1&modestbranding=1&rel=0` : url;
+  const [hasEmbedError, setHasEmbedError] = useState(false);
+
+  // Reset embed error on lesson change
+  useEffect(() => {
+    setHasEmbedError(false);
+  }, [activeLessonId]);
+
+  // Convert YouTube standard URL to embed iframe URL and extract direct link
+  const getEmbedInfo = (url: string) => {
+    if (!url) {
+      return {
+        embedUrl: 'https://www.youtube.com/embed/SqcY0GlETPk?autoplay=1&modestbranding=1&rel=0',
+        directUrl: 'https://www.youtube.com/watch?v=SqcY0GlETPk',
+        videoId: 'SqcY0GlETPk'
+      };
+    }
+    const match = url.match(/(?:youtu\.be\/|youtube\.com\/(?:embed\/|v\/|watch\?v=|watch\?.+&v=|shorts\/))([\w-]{11})/);
+    const videoId = match ? match[1] : null;
+    if (videoId) {
+      return {
+        embedUrl: `https://www.youtube.com/embed/${videoId}?autoplay=1&modestbranding=1&rel=0&enablejsapi=1`,
+        directUrl: `https://www.youtube.com/watch?v=${videoId}`,
+        videoId
+      };
+    }
+    return {
+      embedUrl: url,
+      directUrl: url,
+      videoId: null
+    };
   };
+
+  const currentEmbedInfo = getEmbedInfo(currentLesson?.videoUrl || '');
 
   if (isLoading) {
     return (
@@ -268,15 +294,54 @@ export const LessonPlayerPage: React.FC = () => {
         <div className="flex-1 flex flex-col overflow-y-auto">
           
           {/* VIDEO STAGE */}
-          <div className="w-full bg-black aspect-video max-h-[68vh] flex items-center justify-center relative">
-            {currentLesson?.videoUrl ? (
-              <iframe
-                src={getEmbedUrl(currentLesson.videoUrl)}
-                title={currentLesson.title}
-                className="w-full h-full border-0"
-                allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-                allowFullScreen
-              />
+          <div className="w-full bg-black aspect-video max-h-[68vh] flex items-center justify-center relative overflow-hidden group">
+            {hasEmbedError ? (
+              <div className="w-full h-full flex flex-col items-center justify-center p-8 text-center bg-slate-900 border border-slate-800 space-y-4">
+                <div className="w-16 h-16 rounded-2xl bg-rose-500/10 border border-rose-500/20 text-rose-400 flex items-center justify-center shadow-lg shadow-rose-900/20">
+                  <PlayCircle className="w-8 h-8" />
+                </div>
+                <div className="max-w-md">
+                  <h3 className="text-base font-bold text-white">Embedded Playback Restricted</h3>
+                  <p className="mt-1 text-xs text-slate-400 leading-relaxed">
+                    This video creator restricts embedded iframe playback, or your browser is blocking third-party media cookies. You can watch this official masterclass lesson directly on YouTube.
+                  </p>
+                </div>
+                <div className="flex flex-wrap items-center justify-center gap-3 pt-2">
+                  <a
+                    href={currentEmbedInfo.directUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="px-5 py-2.5 bg-rose-600 hover:bg-rose-700 text-white font-semibold text-xs rounded-xl shadow-lg shadow-rose-600/30 flex items-center gap-2 transition-all hover:scale-105"
+                  >
+                    <ExternalLink className="w-4 h-4" />
+                    <span>Open on YouTube (New Tab)</span>
+                  </a>
+                  <button
+                    onClick={() => setHasEmbedError(false)}
+                    className="px-4 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold rounded-xl transition-colors"
+                  >
+                    Retry Embedded Player
+                  </button>
+                </div>
+              </div>
+            ) : currentLesson?.videoUrl ? (
+              <>
+                <iframe
+                  src={currentEmbedInfo.embedUrl}
+                  title={currentLesson.title}
+                  className="w-full h-full border-0"
+                  allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                  allowFullScreen
+                />
+                <button
+                  onClick={() => setHasEmbedError(true)}
+                  className="absolute bottom-3 right-3 px-2.5 py-1 text-[11px] font-medium bg-black/70 hover:bg-black/90 text-slate-300 hover:text-white rounded-md border border-white/10 opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-1.5"
+                  title="If the video shows a playback error, click to open fallback"
+                >
+                  <HelpCircle className="w-3 h-3 text-amber-400" />
+                  <span>Playback issue?</span>
+                </button>
+              </>
             ) : (
               <div className="text-slate-500 text-xs">Video content loading...</div>
             )}

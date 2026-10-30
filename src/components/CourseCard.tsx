@@ -98,7 +98,7 @@ export const CourseCard: React.FC<CourseCardProps> = ({ course }) => {
               </span>
             ) : (
               <span className="text-base font-bold text-slate-900 dark:text-white tabular-nums">
-                ${course.price.toFixed(2)}
+                ₹{course.price.toLocaleString('en-IN')}
               </span>
             )}
           </div>

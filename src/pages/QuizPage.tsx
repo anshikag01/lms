@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../lib/api';
@@ -12,7 +12,12 @@ import {
   RotateCcw,
   Award,
   Sparkles,
-  Check
+  Check,
+  Clock,
+  AlertCircle,
+  History,
+  FileCheck2,
+  Play
 } from 'lucide-react';
 
 export const QuizPage: React.FC = () => {
@@ -20,10 +25,13 @@ export const QuizPage: React.FC = () => {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
 
+  const [hasStarted, setHasStarted] = useState(false);
   const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0);
   const [selectedAnswers, setSelectedAnswers] = useState<Record<string, number>>({});
   const [quizSubmitted, setQuizSubmitted] = useState(false);
   const [attemptResult, setAttemptResult] = useState<any | null>(null);
+  const [timeLeftSeconds, setTimeLeftSeconds] = useState(15 * 60); // 15 minutes timer
+  const [showReviewModal, setShowReviewModal] = useState(false);
 
   const { data, isLoading, isError, refetch } = useQuery({
     queryKey: ['quiz', courseSlug],
@@ -36,19 +44,41 @@ export const QuizPage: React.FC = () => {
     onSuccess: (res) => {
       setAttemptResult(res);
       setQuizSubmitted(true);
+      setShowReviewModal(false);
       queryClient.invalidateQueries({ queryKey: ['quiz', courseSlug] });
       queryClient.invalidateQueries({ queryKey: ['studentDashboard'] });
       queryClient.invalidateQueries({ queryKey: ['learnCourse', courseSlug] });
 
       if (res.attempt.passed) {
         confetti({
-          particleCount: 100,
-          spread: 70,
+          particleCount: 120,
+          spread: 75,
           origin: { y: 0.6 }
         });
       }
     }
   });
+
+  // Countdown Timer
+  useEffect(() => {
+    if (!hasStarted || quizSubmitted) return;
+
+    const timer = setInterval(() => {
+      setTimeLeftSeconds((prev) => {
+        if (prev <= 1) {
+          clearInterval(timer);
+          // Auto-submit when time expires
+          if (!submitMutation.isPending && !quizSubmitted) {
+            submitMutation.mutate();
+          }
+          return 0;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+
+    return () => clearInterval(timer);
+  }, [hasStarted, quizSubmitted, submitMutation]);
 
   if (isLoading) {
     return (
@@ -84,7 +114,19 @@ export const QuizPage: React.FC = () => {
   const totalQuestions = questions.length;
   const currentQuestion = questions[currentQuestionIndex];
   const isLastQuestion = currentQuestionIndex === totalQuestions - 1;
+  const answeredCount = Object.keys(selectedAnswers).length;
   const allAnswered = questions.every((q) => selectedAnswers[q.id] !== undefined);
+
+  const bestScore = attempts && attempts.length > 0
+    ? Math.max(...attempts.map((a) => a.score))
+    : null;
+  const hasPassedPreviously = attempts && attempts.some((a) => a.passed);
+
+  const formatTimer = (totalSeconds: number) => {
+    const mins = Math.floor(totalSeconds / 60);
+    const secs = totalSeconds % 60;
+    return `${mins}:${secs < 10 ? '0' : ''}${secs}`;
+  };
 
   const handleSelectOption = (optionIndex: number) => {
     if (quizSubmitted) return;
@@ -99,6 +141,8 @@ export const QuizPage: React.FC = () => {
     setQuizSubmitted(false);
     setAttemptResult(null);
     setCurrentQuestionIndex(0);
+    setTimeLeftSeconds(15 * 60);
+    setHasStarted(true);
   };
 
   return (
@@ -114,23 +158,118 @@ export const QuizPage: React.FC = () => {
             <ArrowLeft className="w-3.5 h-3.5" />
             <span>Back to Lessons</span>
           </Link>
-          <span className="text-xs font-semibold text-indigo-600 dark:text-indigo-400">
-            Pass Threshold: {quiz.passPercentage}%
-          </span>
+
+          {hasStarted && !quizSubmitted && (
+            <div className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-mono font-bold tabular-nums border ${
+              timeLeftSeconds < 120
+                ? 'bg-rose-50 text-rose-600 border-rose-200 dark:bg-rose-950/50 dark:text-rose-400 dark:border-rose-800 animate-pulse'
+                : 'bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-800'
+            }`}>
+              <Clock className="w-3.5 h-3.5 text-indigo-500" />
+              <span>{formatTimer(timeLeftSeconds)}</span>
+            </div>
+          )}
         </div>
 
-        {/* QUIZ HEADER */}
-        <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200/90 dark:border-slate-800/90 p-6 shadow-xs mb-6">
-          <p className="text-xs font-bold uppercase tracking-wider text-slate-400">
-            Certification Exam · {courseTitle}
-          </p>
-          <h1 className="text-xl sm:text-2xl font-extrabold text-slate-900 dark:text-white mt-1">
-            {quiz.title}
-          </h1>
-        </div>
+        {/* 1. INTRO SCREEN BEFORE STARTING */}
+        {!hasStarted && !quizSubmitted && (
+          <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200/90 dark:border-slate-800/90 p-8 shadow-sm space-y-6">
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <p className="text-xs font-bold uppercase tracking-wider text-indigo-600 dark:text-indigo-400">
+                  Certification Assessment · {courseTitle}
+                </p>
+                <h1 className="text-2xl sm:text-3xl font-extrabold text-slate-900 dark:text-white mt-1">
+                  {quiz.title}
+                </h1>
+                <p className="mt-2 text-xs text-slate-500 dark:text-slate-400 leading-relaxed">
+                  Test your mastery of the concepts covered throughout this comprehensive curriculum. Passing this exam fulfills the final requirement to unlock your accredited certificate.
+                </p>
+              </div>
+              <div className="w-14 h-14 rounded-2xl bg-indigo-50 dark:bg-indigo-950/60 text-indigo-600 dark:text-indigo-400 flex items-center justify-center shrink-0">
+                <FileCheck2 className="w-8 h-8" />
+              </div>
+            </div>
 
-        {/* RESULTS SCREEN */}
-        {quizSubmitted && attemptResult ? (
+            {/* Assessment Specifications */}
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 pt-4 border-t border-slate-100 dark:border-slate-800">
+              <div className="p-3 bg-slate-50 dark:bg-slate-950/70 rounded-xl">
+                <span className="text-[11px] text-slate-400 uppercase tracking-wider block">Questions</span>
+                <span className="text-lg font-bold text-slate-900 dark:text-white font-mono tabular-nums">
+                  {totalQuestions} MCQs
+                </span>
+              </div>
+              <div className="p-3 bg-slate-50 dark:bg-slate-950/70 rounded-xl">
+                <span className="text-[11px] text-slate-400 uppercase tracking-wider block">Passing Mark</span>
+                <span className="text-lg font-bold text-emerald-600 dark:text-emerald-400 font-mono tabular-nums">
+                  {quiz.passPercentage}%
+                </span>
+              </div>
+              <div className="p-3 bg-slate-50 dark:bg-slate-950/70 rounded-xl">
+                <span className="text-[11px] text-slate-400 uppercase tracking-wider block">Time Limit</span>
+                <span className="text-lg font-bold text-indigo-600 dark:text-indigo-400 font-mono tabular-nums">
+                  15 Minutes
+                </span>
+              </div>
+              <div className="p-3 bg-slate-50 dark:bg-slate-950/70 rounded-xl">
+                <span className="text-[11px] text-slate-400 uppercase tracking-wider block">Best Score</span>
+                <span className="text-lg font-bold text-amber-500 font-mono tabular-nums">
+                  {bestScore !== null ? `${bestScore}%` : 'Not attempted'}
+                </span>
+              </div>
+            </div>
+
+            {/* Previous Attempts History */}
+            {attempts && attempts.length > 0 && (
+              <div className="pt-4 border-t border-slate-100 dark:border-slate-800 space-y-3">
+                <h3 className="text-xs font-bold text-slate-900 dark:text-white uppercase tracking-wider flex items-center gap-1.5">
+                  <History className="w-3.5 h-3.5 text-slate-400" />
+                  <span>Previous Attempts ({attempts.length})</span>
+                </h3>
+                <div className="space-y-2">
+                  {attempts.slice(0, 3).map((att) => (
+                    <div
+                      key={att.id}
+                      className="p-3 bg-slate-50 dark:bg-slate-950 rounded-xl border border-slate-100 dark:border-slate-800/80 flex items-center justify-between text-xs"
+                    >
+                      <div className="flex items-center gap-2">
+                        {att.passed ? (
+                          <span className="flex items-center gap-1 text-emerald-600 font-semibold">
+                            <CheckCircle2 className="w-4 h-4" /> Passed
+                          </span>
+                        ) : (
+                          <span className="flex items-center gap-1 text-rose-500 font-semibold">
+                            <XCircle className="w-4 h-4" /> Failed
+                          </span>
+                        )}
+                        <span className="text-slate-400">·</span>
+                        <span className="text-slate-500">{new Date(att.createdAt).toLocaleDateString()}</span>
+                      </div>
+                      <span className="font-bold font-mono text-slate-900 dark:text-white">{att.score}%</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Start Button */}
+            <div className="pt-6 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between">
+              <span className="text-xs text-slate-500">
+                Ensure you have completed all lessons for maximum score.
+              </span>
+              <button
+                onClick={() => setHasStarted(true)}
+                className="px-6 py-3 bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-700 hover:to-violet-700 text-white font-bold text-xs rounded-xl shadow-md flex items-center gap-2 transition-all hover:scale-105"
+              >
+                <span>{attempts?.length ? 'Retake Exam' : 'Start Assessment'}</span>
+                <ArrowRight className="w-4 h-4" />
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* 2. RESULTS SCREEN */}
+        {quizSubmitted && attemptResult && (
           <div className="space-y-6">
             
             {/* Score Banner */}
@@ -184,7 +323,7 @@ export const QuizPage: React.FC = () => {
             {/* In-depth Answer Feedback List */}
             <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200/90 dark:border-slate-800/90 p-6 shadow-xs space-y-6">
               <h3 className="text-sm font-bold text-slate-900 dark:text-white uppercase tracking-wider">
-                Question Review & Explanations
+                Question Review & Detailed Explanations
               </h3>
 
               <div className="space-y-6">
@@ -222,26 +361,54 @@ export const QuizPage: React.FC = () => {
             </div>
 
           </div>
-        ) : (
-          /* ACTIVE QUESTION CARD FLOW */
+        )}
+
+        {/* 3. ACTIVE QUESTION FLOW */}
+        {hasStarted && !quizSubmitted && (
           <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200/90 dark:border-slate-800/90 p-6 sm:p-8 shadow-xs space-y-6">
             
-            {/* Step Counter Strip */}
-            <div className="flex items-center justify-between text-xs text-slate-500">
-              <span className="font-semibold">
-                Question <span className="font-mono tabular-nums">{currentQuestionIndex + 1}</span> of <span className="font-mono tabular-nums">{totalQuestions}</span>
-              </span>
-              <span className="text-[11px] text-slate-400">
-                {Object.keys(selectedAnswers).length} of {totalQuestions} answered
-              </span>
-            </div>
+            {/* Step Counter & Question Navigator Grid */}
+            <div className="space-y-3">
+              <div className="flex items-center justify-between text-xs text-slate-500">
+                <span className="font-semibold">
+                  Question <span className="font-mono tabular-nums">{currentQuestionIndex + 1}</span> of <span className="font-mono tabular-nums">{totalQuestions}</span>
+                </span>
+                <span className="text-[11px] text-slate-400">
+                  {answeredCount} of {totalQuestions} answered
+                </span>
+              </div>
 
-            {/* Progress line */}
-            <div className="w-full bg-slate-100 dark:bg-slate-800 h-1.5 rounded-full overflow-hidden">
-              <div
-                className="bg-indigo-600 h-full transition-all duration-300"
-                style={{ width: `${((currentQuestionIndex + 1) / totalQuestions) * 100}%` }}
-              />
+              {/* Question Navigator Bubbles */}
+              <div className="flex flex-wrap items-center gap-2 pt-1">
+                {questions.map((q, idx) => {
+                  const isCurrent = idx === currentQuestionIndex;
+                  const isAnswered = selectedAnswers[q.id] !== undefined;
+                  return (
+                    <button
+                      key={q.id}
+                      onClick={() => setCurrentQuestionIndex(idx)}
+                      className={`w-7 h-7 rounded-lg text-xs font-mono font-bold transition-all flex items-center justify-center ${
+                        isCurrent
+                          ? 'bg-indigo-600 text-white ring-2 ring-indigo-500/30'
+                          : isAnswered
+                          ? 'bg-emerald-100 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-800'
+                          : 'bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400 hover:bg-slate-200'
+                      }`}
+                      title={`Question ${idx + 1}`}
+                    >
+                      {idx + 1}
+                    </button>
+                  );
+                })}
+              </div>
+
+              {/* Progress bar */}
+              <div className="w-full bg-slate-100 dark:bg-slate-800 h-1.5 rounded-full overflow-hidden mt-2">
+                <div
+                  className="bg-indigo-600 h-full transition-all duration-300"
+                  style={{ width: `${((currentQuestionIndex + 1) / totalQuestions) * 100}%` }}
+                />
+              </div>
             </div>
 
             {/* Question Text */}
@@ -290,24 +457,86 @@ export const QuizPage: React.FC = () => {
                 Previous
               </button>
 
-              {isLastQuestion ? (
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => setShowReviewModal(true)}
+                  className="px-3.5 py-2 text-xs font-medium text-slate-500 hover:text-slate-900 dark:hover:text-white transition-colors"
+                >
+                  Review Answers ({answeredCount}/{totalQuestions})
+                </button>
+
+                {isLastQuestion ? (
+                  <button
+                    disabled={!allAnswered || submitMutation.isPending}
+                    onClick={() => submitMutation.mutate()}
+                    className="px-6 py-2.5 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white text-xs font-bold rounded-xl shadow-md transition-all disabled:opacity-50"
+                  >
+                    {submitMutation.isPending ? 'Grading Exam...' : 'Submit Assessment'}
+                  </button>
+                ) : (
+                  <button
+                    onClick={() => setCurrentQuestionIndex((prev) => prev + 1)}
+                    className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold rounded-xl shadow-xs transition-colors"
+                  >
+                    Next Question →
+                  </button>
+                )}
+              </div>
+            </div>
+
+          </div>
+        )}
+
+        {/* Review Answers Modal */}
+        {showReviewModal && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs">
+            <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 max-w-lg w-full p-6 space-y-4 shadow-xl">
+              <h3 className="text-base font-bold text-slate-900 dark:text-white">
+                Review Your Answers
+              </h3>
+              <p className="text-xs text-slate-500">
+                You have answered {answeredCount} out of {totalQuestions} questions. You can click any question below to change your answer before submission.
+              </p>
+
+              <div className="grid grid-cols-4 gap-2 py-3">
+                {questions.map((q, idx) => {
+                  const isAnswered = selectedAnswers[q.id] !== undefined;
+                  return (
+                    <button
+                      key={q.id}
+                      onClick={() => {
+                        setCurrentQuestionIndex(idx);
+                        setShowReviewModal(false);
+                      }}
+                      className={`p-2.5 rounded-xl text-xs font-semibold flex items-center justify-between border ${
+                        isAnswered
+                          ? 'bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-950/40 dark:text-emerald-300 dark:border-emerald-800'
+                          : 'bg-rose-50 text-rose-700 border-rose-200 dark:bg-rose-950/40 dark:text-rose-300 dark:border-rose-800'
+                      }`}
+                    >
+                      <span>Q{idx + 1}</span>
+                      <span>{isAnswered ? '✓' : '—'}</span>
+                    </button>
+                  );
+                })}
+              </div>
+
+              <div className="flex items-center justify-between pt-4 border-t border-slate-100 dark:border-slate-800">
+                <button
+                  onClick={() => setShowReviewModal(false)}
+                  className="px-4 py-2 text-xs font-semibold text-slate-600 hover:text-slate-900"
+                >
+                  Return to Exam
+                </button>
                 <button
                   disabled={!allAnswered || submitMutation.isPending}
                   onClick={() => submitMutation.mutate()}
-                  className="px-6 py-2.5 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white text-xs font-bold rounded-xl shadow-md transition-all disabled:opacity-50"
+                  className="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-xl disabled:opacity-50"
                 >
-                  {submitMutation.isPending ? 'Grading Exam...' : 'Submit Final Assessment'}
+                  {submitMutation.isPending ? 'Grading...' : 'Confirm & Submit'}
                 </button>
-              ) : (
-                <button
-                  onClick={() => setCurrentQuestionIndex((prev) => prev + 1)}
-                  className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold rounded-xl shadow-xs transition-colors"
-                >
-                  Next Question →
-                </button>
-              )}
+              </div>
             </div>
-
           </div>
         )}
 

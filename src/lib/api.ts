@@ -261,9 +261,36 @@ export const api = {
       method: 'DELETE'
     }),
 
-  resetDatabase: () =>
+  confirmResetPassword: (payload: { token: string; newPassword: string }) =>
+    fetchApi<{ success: boolean; message: string }>('/api/auth/reset-password-confirm', {
+      method: 'POST',
+      body: JSON.stringify(payload)
+    }),
+
+  deleteReview: (courseId: string) =>
+    fetchApi<{ success: boolean; message: string }>(`/api/courses/${courseId}/reviews`, {
+      method: 'DELETE'
+    }),
+
+  // Certificate Verification & Admin
+  verifyCertificate: (code: string) =>
+    fetchApi<CertificateData & { valid: boolean; code: string; revoked?: boolean; revokedReason?: string }>(`/api/verify/${encodeURIComponent(code)}`),
+
+  revokeCertificate: (code: string, reason?: string) =>
+    fetchApi<{ success: boolean; message: string; certificate: any }>(`/api/admin/certificates/${encodeURIComponent(code)}/revoke`, {
+      method: 'PUT',
+      body: JSON.stringify({ reason })
+    }),
+
+  restoreCertificate: (code: string) =>
+    fetchApi<{ success: boolean; message: string; certificate: any }>(`/api/admin/certificates/${encodeURIComponent(code)}/restore`, {
+      method: 'PUT'
+    }),
+
+  resetDatabase: (confirmation = 'RESET') =>
     fetchApi<{ success: boolean; message: string }>('/api/admin/reset-database', {
-      method: 'POST'
+      method: 'POST',
+      body: JSON.stringify({ confirmation })
     }),
 
   // AI Chat
