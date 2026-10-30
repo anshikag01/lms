@@ -111,6 +111,8 @@ export interface Quiz {
   courseId: string;
   title: string;
   passPercentage: number;
+  timeLimitMinutes?: number;
+  maxAttempts?: number;
 }
 
 export interface QuizQuestion {
@@ -929,10 +931,32 @@ async function startServer() {
   }
 
   // -------------------------------------------------------------
-  // AUTH API
+  // AUTH API WITH SECURITY RATE-LIMITING
   // -------------------------------------------------------------
 
+  const authRateLimits = new Map<string, { count: number; resetAt: number }>();
+
+  function checkAuthRateLimit(key: string): boolean {
+    const now = Date.now();
+    const windowMs = 5 * 60 * 1000; // 5 min
+    const record = authRateLimits.get(key);
+    if (!record || now > record.resetAt) {
+      authRateLimits.set(key, { count: 1, resetAt: now + windowMs });
+      return true;
+    }
+    if (record.count >= 20) {
+      return false;
+    }
+    record.count++;
+    return true;
+  }
+
   app.post('/api/auth/signup', (req: Request, res: Response) => {
+    const clientKey = (req.ip || 'ip') + '_' + (req.body?.email || '');
+    if (!checkAuthRateLimit(clientKey)) {
+      return res.status(429).json({ error: 'Too many authentication attempts. Please pause for a few minutes.' });
+    }
+
     const { email, password, fullName, role } = req.body;
     if (!email || !password || !fullName) {
       return res.status(400).json({ error: 'Email, password, and full name are required.' });
@@ -987,6 +1011,11 @@ async function startServer() {
   });
 
   app.post('/api/auth/login', (req: Request, res: Response) => {
+    const clientKey = (req.ip || 'ip') + '_' + (req.body?.email || '');
+    if (!checkAuthRateLimit(clientKey)) {
+      return res.status(429).json({ error: 'Too many authentication attempts. Please pause for a few minutes.' });
+    }
+
     const { email, password } = req.body;
     if (!email || !password) {
       return res.status(400).json({ error: 'Email and password are required.' });
@@ -1042,22 +1071,6 @@ async function startServer() {
   });
 
   const resetTokens = new Map<string, { email: string; expiresAt: number }>();
-  const authRateLimits = new Map<string, { count: number; resetAt: number }>();
-
-  function checkAuthRateLimit(ipOrEmail: string): boolean {
-    const now = Date.now();
-    const windowMs = 5 * 60 * 1000; // 5 min
-    const record = authRateLimits.get(ipOrEmail);
-    if (!record || now > record.resetAt) {
-      authRateLimits.set(ipOrEmail, { count: 1, resetAt: now + windowMs });
-      return true;
-    }
-    if (record.count >= 20) {
-      return false;
-    }
-    record.count++;
-    return true;
-  }
 
   app.post('/api/auth/reset-password', (req: Request, res: Response) => {
     const { email } = req.body;
@@ -1705,6 +1718,16 @@ async function startServer() {
     const quiz = state.quizzes.find(q => q.courseId === course.id);
     if (!quiz) return res.status(404).json({ error: 'Quiz not found.' });
 
+    // Server-side enforcement of maximum allowed attempts
+    if (quiz.maxAttempts && quiz.maxAttempts > 0) {
+      const priorAttempts = state.quizAttempts.filter(a => a.userId === userId && a.quizId === quiz.id);
+      if (priorAttempts.length >= quiz.maxAttempts) {
+        return res.status(400).json({
+          error: `You have reached the maximum allowed attempts (${quiz.maxAttempts}) for this assessment.`
+        });
+      }
+    }
+
     const questions = state.quizQuestions.filter(q => q.quizId === quiz.id);
     if (questions.length === 0) return res.status(400).json({ error: 'Quiz has no questions.' });
 
@@ -1796,6 +1819,7 @@ async function startServer() {
     return res.json({
       certificateId: code,
       code,
+      ownerId: enrollment.userId,
       issuedAt: certRecord ? certRecord.issuedAt : enrollment.completedAt,
       studentName: studentProfile?.fullName || 'Distinguished Scholar',
       courseTitle: course?.title || 'Certified Curriculum',
@@ -1804,11 +1828,13 @@ async function startServer() {
       totalDurationMinutes: aggregates?.totalDurationMinutes || 180,
       totalLessons: aggregates?.totalLessons || 12,
       revoked: !!certRecord?.revoked,
+      revokedAt: certRecord?.revokedAt,
       revokedReason: certRecord?.revokedReason
     });
   });
 
-  // Public Certificate Verification Endpoint (Phase 4)
+  // Public Certificate Verification Endpoint (A.4)
+  // Returns only student_name, course_title, instructor_name, issued_at, status (No user id or email)
   app.get('/api/verify/:code', (req: Request, res: Response) => {
     const { code } = req.params;
     const state = db.getState();
@@ -1832,21 +1858,54 @@ async function startServer() {
     const aggregates = course ? getCourseAggregates(course.id) : null;
 
     const isRevoked = !!certRecord?.revoked;
+    const status = isRevoked ? 'revoked' : 'valid';
 
     return res.json({
-      valid: !isRevoked,
-      code: certRecord ? certRecord.code : cleanCode,
-      issuedAt: certRecord ? certRecord.issuedAt : enrollment!.completedAt,
+      // Official required fields (A.4 - No user id or email)
+      student_name: studentProfile?.fullName || 'Distinguished Student',
+      course_title: course?.title || 'Certified Curriculum',
+      instructor_name: instructorProfile?.fullName || 'LearnHub Faculty',
+      issued_at: certRecord ? certRecord.issuedAt : enrollment!.completedAt,
+      status,
+      // UI convenience aliases
       studentName: studentProfile?.fullName || 'Distinguished Student',
       courseTitle: course?.title || 'Certified Curriculum',
-      courseSlug: course?.slug || '',
       instructorName: instructorProfile?.fullName || 'LearnHub Faculty',
+      issuedAt: certRecord ? certRecord.issuedAt : enrollment!.completedAt,
+      valid: !isRevoked,
+      code: certRecord ? certRecord.code : cleanCode,
+      courseSlug: course?.slug || '',
       totalDurationMinutes: aggregates?.totalDurationMinutes || 180,
       totalLessons: aggregates?.totalLessons || 12,
       revoked: isRevoked,
       revokedAt: certRecord?.revokedAt,
-      revokedReason: certRecord?.revokedReason || 'Revoked for administrative review.'
+      revokedReason: certRecord?.revokedReason || (isRevoked ? 'Revoked for administrative review.' : undefined)
     });
+  });
+
+  // Admin: Get all certificates with search and filter capability
+  app.get('/api/admin/certificates', requireAuth, requireRole('admin'), (req: Request, res: Response) => {
+    const state = db.getState();
+    const certificates = (state.certificates || []).map(cert => {
+      const user = state.users.find(u => u.id === cert.userId);
+      const profile = state.profiles.find(p => p.id === cert.userId);
+      const course = state.courses.find(c => c.id === cert.courseId);
+      return {
+        id: cert.id,
+        code: cert.code,
+        userId: cert.userId,
+        courseId: cert.courseId,
+        studentName: profile?.fullName || 'Student',
+        studentEmail: user?.email || '',
+        courseTitle: course?.title || 'Accredited Masterclass',
+        issuedAt: cert.issuedAt,
+        revoked: !!cert.revoked,
+        revokedAt: cert.revokedAt,
+        revokedReason: cert.revokedReason
+      };
+    }).sort((a, b) => new Date(b.issuedAt).getTime() - new Date(a.issuedAt).getTime());
+
+    return res.json(certificates);
   });
 
   // Admin / Instructor Certificate Revocation & Restoration
@@ -1921,9 +1980,11 @@ async function startServer() {
 
     const decoratedCourses = instructorCourses.map(c => {
       const aggregates = getCourseAggregates(c.id);
+      const certificatesIssued = (state.certificates || []).filter(cert => cert.courseId === c.id && !cert.revoked).length;
       return {
         ...c,
-        aggregates
+        aggregates,
+        certificatesIssued
       };
     });
 
@@ -1935,6 +1996,111 @@ async function startServer() {
         totalEarnings: Math.round(totalEarnings)
       },
       courses: decoratedCourses
+    });
+  });
+
+  // Get Quiz & Questions & Stats for Instructor Course Builder (B)
+  app.get('/api/instructor/courses/:id/quiz', requireAuth, requireRole('instructor'), (req: Request, res: Response) => {
+    const { id } = req.params;
+    const instructorId = (req as any).userId;
+    const state = db.getState();
+
+    const course = state.courses.find(c => c.id === id);
+    if (!course) return res.status(404).json({ error: 'Course not found.' });
+    if (course.instructorId !== instructorId && !hasRole(instructorId, 'admin')) {
+      return res.status(403).json({ error: 'Unauthorized to view quiz for this course.' });
+    }
+
+    let quiz = state.quizzes.find(q => q.courseId === id);
+    if (!quiz) {
+      quiz = {
+        id: `quiz-${id}`,
+        courseId: id,
+        title: `${course.title} Comprehensive Exam`,
+        passPercentage: 75,
+        timeLimitMinutes: 15,
+        maxAttempts: 3
+      };
+      state.quizzes.push(quiz);
+      db.save();
+    }
+
+    const questions = state.quizQuestions.filter(q => q.quizId === quiz!.id);
+    const attempts = state.quizAttempts.filter(a => a.quizId === quiz!.id);
+    const totalAttempts = attempts.length;
+    const passedAttempts = attempts.filter(a => a.passed).length;
+    const avgScore = totalAttempts > 0
+      ? Math.round(attempts.reduce((sum, a) => sum + a.score, 0) / totalAttempts)
+      : 0;
+    const passRate = totalAttempts > 0
+      ? Math.round((passedAttempts / totalAttempts) * 100)
+      : 0;
+
+    return res.json({
+      quiz,
+      questions,
+      stats: {
+        totalAttempts,
+        avgScore,
+        passRate
+      }
+    });
+  });
+
+  // Update Quiz & Questions for Instructor Course Builder (B)
+  app.put('/api/instructor/courses/:id/quiz', requireAuth, requireRole('instructor'), (req: Request, res: Response) => {
+    const { id } = req.params;
+    const instructorId = (req as any).userId;
+    const { title, passPercentage, timeLimitMinutes, maxAttempts, questions } = req.body;
+    const state = db.getState();
+
+    const course = state.courses.find(c => c.id === id);
+    if (!course) return res.status(404).json({ error: 'Course not found.' });
+    if (course.instructorId !== instructorId && !hasRole(instructorId, 'admin')) {
+      return res.status(403).json({ error: 'Unauthorized.' });
+    }
+
+    let quiz = state.quizzes.find(q => q.courseId === id);
+    if (!quiz) {
+      quiz = {
+        id: `quiz-${id}`,
+        courseId: id,
+        title: title || `${course.title} Comprehensive Exam`,
+        passPercentage: passPercentage !== undefined ? Number(passPercentage) : 75,
+        timeLimitMinutes: timeLimitMinutes !== undefined ? Number(timeLimitMinutes) : 15,
+        maxAttempts: maxAttempts !== undefined ? Number(maxAttempts) : 3
+      };
+      state.quizzes.push(quiz);
+    } else {
+      if (title !== undefined) quiz.title = title;
+      if (passPercentage !== undefined) quiz.passPercentage = Number(passPercentage);
+      if (timeLimitMinutes !== undefined) quiz.timeLimitMinutes = Number(timeLimitMinutes);
+      if (maxAttempts !== undefined) quiz.maxAttempts = Number(maxAttempts);
+    }
+
+    if (Array.isArray(questions)) {
+      // Remove existing questions for this quiz
+      state.quizQuestions = state.quizQuestions.filter(q => q.quizId !== quiz!.id);
+      // Insert updated questions
+      for (let i = 0; i < questions.length; i++) {
+        const q = questions[i];
+        state.quizQuestions.push({
+          id: q.id || `q-${quiz!.id}-${i + 1}`,
+          quizId: quiz!.id,
+          question: q.question,
+          options: q.options || [],
+          correctIndex: q.correctIndex !== undefined ? Number(q.correctIndex) : 0,
+          explanation: q.explanation || ''
+        });
+      }
+    }
+
+    db.save();
+
+    return res.json({
+      success: true,
+      quiz,
+      questions: state.quizQuestions.filter(q => q.quizId === quiz!.id)
     });
   });
 

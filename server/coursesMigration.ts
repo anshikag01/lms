@@ -18,9 +18,10 @@ import {
 
 export function generateCertCode(year = 2026): string {
   const chars = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ';
+  const bytes = crypto.randomBytes(10);
   let rand = '';
   for (let i = 0; i < 10; i++) {
-    rand += chars.charAt(Math.floor(Math.random() * chars.length));
+    rand += chars[bytes[i] % chars.length];
   }
   return `LH-${year}-${rand}`;
 }
@@ -380,14 +381,59 @@ export function migrateDatabase(state: DatabaseState): boolean {
     }
   }
 
-  // 7. Backfill Certificates for Eligible Enrollments (Phase 4)
-  // Ensure certificate records exist in state.certificates with format LH-{YEAR}-{10 random chars}
+  // 7. Backfill & Validate Certificates for Eligible Enrollments (A.3)
+  // Ensure certificate records exist with format LH-{YEAR}-{10 random uppercase alphanumerics} via crypto.randomBytes
+  // Granting happens only when 100% lessons are done AND (if quiz exists) a passing attempt exists, once per user+course.
+
+  // First, deduplicate existing certificates (keep first per userId+courseId)
+  const uniqueCertMap = new Map<string, CertificateRecord>();
+  const validCertList: CertificateRecord[] = [];
+  for (const cert of state.certificates) {
+    const key = `${cert.userId}___${cert.courseId}`;
+    if (!uniqueCertMap.has(key)) {
+      // Migrate old non-standard codes like CERT-LH-2026-9812A to LH-{YEAR}-{10 random chars}
+      if (!/^LH-\d{4}-[A-Z0-9]{10}$/.test(cert.code)) {
+        const yearMatch = cert.code.match(/20\d{2}/);
+        const certYear = yearMatch ? parseInt(yearMatch[0], 10) : 2026;
+        cert.code = generateCertCode(certYear);
+        modified = true;
+      }
+      uniqueCertMap.set(key, cert);
+      validCertList.push(cert);
+    } else {
+      modified = true; // Dropped duplicate
+    }
+  }
+  state.certificates = validCertList;
+
+  // Next, verify eligibility and backfill for all enrollments
   for (const enr of state.enrollments) {
-    if (enr.completedAt) {
-      // Find or create certificate record
+    const sections = state.sections.filter(s => s.courseId === enr.courseId);
+    const secIds = new Set(sections.map(s => s.id));
+    const courseLessons = state.lessons.filter(l => secIds.has(l.sectionId));
+
+    const totalLessons = courseLessons.length;
+    const completedLessons = totalLessons > 0
+      ? courseLessons.filter(l => state.lessonProgress.some(p => p.userId === enr.userId && p.lessonId === l.id && p.completed)).length
+      : 0;
+    const isLessonsComplete = totalLessons > 0 && completedLessons === totalLessons;
+
+    const quiz = state.quizzes.find(q => q.courseId === enr.courseId);
+    let isQuizPassed = true;
+    if (quiz) {
+      isQuizPassed = state.quizAttempts.some(a => a.userId === enr.userId && a.quizId === quiz.id && a.passed);
+    }
+
+    const isEligible = isLessonsComplete && isQuizPassed;
+
+    if (isEligible) {
+      if (!enr.completedAt) {
+        enr.completedAt = new Date().toISOString();
+        modified = true;
+      }
       let certRecord = state.certificates.find(c => c.userId === enr.userId && c.courseId === enr.courseId);
       if (!certRecord) {
-        const code = generateCertCode(2026);
+        const code = generateCertCode(new Date(enr.completedAt).getFullYear() || 2026);
         certRecord = {
           id: `cert-${crypto.randomUUID()}`,
           code,
@@ -400,11 +446,6 @@ export function migrateDatabase(state: DatabaseState): boolean {
         enr.certificateId = code;
         modified = true;
       } else {
-        // Ensure code follows LH-2026-XXXXXXXXXX standard
-        if (!certRecord.code.startsWith('LH-')) {
-          certRecord.code = generateCertCode(2026);
-          modified = true;
-        }
         enr.certificateId = certRecord.code;
       }
     }

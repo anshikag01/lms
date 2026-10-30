@@ -8,6 +8,7 @@ interface ConfirmDialogProps {
   confirmText?: string;
   cancelText?: string;
   confirmVariant?: 'danger' | 'primary';
+  requireConfirmationText?: string;
   onConfirm: () => void;
   onCancel: () => void;
 }
@@ -19,10 +20,21 @@ export const ConfirmDialog: React.FC<ConfirmDialogProps> = ({
   confirmText = 'Confirm',
   cancelText = 'Cancel',
   confirmVariant = 'primary',
+  requireConfirmationText,
   onConfirm,
   onCancel
 }) => {
+  const [typedText, setTypedText] = React.useState('');
+
+  React.useEffect(() => {
+    if (isOpen) {
+      setTypedText('');
+    }
+  }, [isOpen]);
+
   if (!isOpen) return null;
+
+  const isConfirmed = !requireConfirmationText || typedText.trim() === requireConfirmationText.trim();
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-xs animate-in fade-in duration-150">
@@ -41,6 +53,22 @@ export const ConfirmDialog: React.FC<ConfirmDialogProps> = ({
               <p className="mt-1 text-xs text-slate-500 dark:text-slate-400 leading-relaxed">
                 {message}
               </p>
+
+              {requireConfirmationText && (
+                <div className="mt-3 pt-2">
+                  <label className="block text-[11px] font-semibold text-slate-600 dark:text-slate-400 mb-1">
+                    Type <strong className="text-rose-600 dark:text-rose-400 font-mono">{requireConfirmationText}</strong> to confirm:
+                  </label>
+                  <input
+                    type="text"
+                    value={typedText}
+                    onChange={(e) => setTypedText(e.target.value)}
+                    placeholder={`Type "${requireConfirmationText}"...`}
+                    className="w-full px-3 py-1.5 text-xs bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg text-slate-900 dark:text-white font-mono focus:outline-none focus:ring-1 focus:ring-rose-500"
+                    autoFocus
+                  />
+                </div>
+              )}
             </div>
           </div>
           <button
@@ -61,8 +89,9 @@ export const ConfirmDialog: React.FC<ConfirmDialogProps> = ({
           </button>
           <button
             type="button"
+            disabled={!isConfirmed}
             onClick={onConfirm}
-            className={`px-4 py-2 text-xs font-semibold text-white rounded-lg transition-colors ${
+            className={`px-4 py-2 text-xs font-semibold text-white rounded-lg transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
               confirmVariant === 'danger'
                 ? 'bg-rose-600 hover:bg-rose-700'
                 : 'bg-indigo-600 hover:bg-indigo-700'

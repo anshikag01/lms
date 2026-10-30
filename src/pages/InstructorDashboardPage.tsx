@@ -21,7 +21,13 @@ import {
   ArrowRight,
   Upload,
   Video,
-  X
+  X,
+  Award,
+  ChevronUp,
+  ChevronDown,
+  Check,
+  HelpCircle,
+  BarChart3
 } from 'lucide-react';
 
 export const InstructorDashboardPage: React.FC = () => {
@@ -31,16 +37,16 @@ export const InstructorDashboardPage: React.FC = () => {
   const [activeTab, setActiveTab] = useState<'courses' | 'students'>('courses');
   const [selectedCourseForStudents, setSelectedCourseForStudents] = useState<string | null>(null);
 
-  // Course Builder Modal State
+  // Course Builder Modal State (4 Steps: Details, Curriculum, Quiz Builder, Review & Publish)
   const [isBuilderOpen, setIsBuilderOpen] = useState(false);
   const [editingCourseId, setEditingCourseId] = useState<string | null>(null);
-  const [builderStep, setBuilderStep] = useState<1 | 2 | 3>(1);
+  const [builderStep, setBuilderStep] = useState<1 | 2 | 3 | 4>(1);
 
   // Course Form State
   const [courseTitle, setCourseTitle] = useState('');
   const [courseCategory, setCourseCategory] = useState('');
   const [courseLevel, setCourseLevel] = useState<'beginner' | 'intermediate' | 'advanced'>('beginner');
-  const [coursePrice, setCoursePrice] = useState(79.99);
+  const [coursePrice, setCoursePrice] = useState(799);
   const [courseShortDesc, setCourseShortDesc] = useState('');
   const [courseDesc, setCourseDesc] = useState('');
   const [whatYouLearnInput, setWhatYouLearnInput] = useState('');
@@ -64,6 +70,17 @@ export const InstructorDashboardPage: React.FC = () => {
     }
   ]);
 
+  // Quiz Builder State (B)
+  const [quizTitle, setQuizTitle] = useState('');
+  const [quizPassPercent, setQuizPassPercent] = useState(75);
+  const [quizTimeLimit, setQuizTimeLimit] = useState(15);
+  const [quizMaxAttempts, setQuizMaxAttempts] = useState(3);
+  const [quizQuestions, setQuizQuestions] = useState<
+    { id: string; question: string; options: string[]; correctIndex: number; explanation: string }[]
+  >([]);
+  const [quizStats, setQuizStats] = useState<{ totalAttempts: number; avgScore: number; passRate: number } | null>(null);
+  const [isLoadingQuiz, setIsLoadingQuiz] = useState(false);
+
   // Delete Dialog State
   const [courseToDelete, setCourseToDelete] = useState<{ id: string; title: string } | null>(null);
 
@@ -86,7 +103,19 @@ export const InstructorDashboardPage: React.FC = () => {
 
   // Mutations
   const createMutation = useMutation({
-    mutationFn: (payload: any) => api.createCourse(payload),
+    mutationFn: async (payload: any) => {
+      const res = await api.createCourse(payload);
+      if (res.course?.id && quizQuestions.length > 0) {
+        await api.updateInstructorCourseQuiz(res.course.id, {
+          title: quizTitle || `${payload.title} Final Exam`,
+          passPercentage: quizPassPercent,
+          timeLimitMinutes: quizTimeLimit,
+          maxAttempts: quizMaxAttempts,
+          questions: quizQuestions
+        });
+      }
+      return res;
+    },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['instructorDashboard'] });
       queryClient.invalidateQueries({ queryKey: ['courses'] });
@@ -96,7 +125,17 @@ export const InstructorDashboardPage: React.FC = () => {
   });
 
   const updateMutation = useMutation({
-    mutationFn: ({ id, payload }: { id: string; payload: any }) => api.updateCourse(id, payload),
+    mutationFn: async ({ id, payload }: { id: string; payload: any }) => {
+      const res = await api.updateCourse(id, payload);
+      await api.updateInstructorCourseQuiz(id, {
+        title: quizTitle || `${payload.title} Final Exam`,
+        passPercentage: quizPassPercent,
+        timeLimitMinutes: quizTimeLimit,
+        maxAttempts: quizMaxAttempts,
+        questions: quizQuestions
+      });
+      return res;
+    },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['instructorDashboard'] });
       queryClient.invalidateQueries({ queryKey: ['courses'] });
@@ -119,7 +158,7 @@ export const InstructorDashboardPage: React.FC = () => {
     setCourseTitle('');
     setCourseCategory(categories?.[0]?.id || 'cat-1');
     setCourseLevel('beginner');
-    setCoursePrice(79.99);
+    setCoursePrice(799);
     setCourseShortDesc('');
     setCourseDesc('');
     setWhatYouLearnInput('');
@@ -138,7 +177,65 @@ export const InstructorDashboardPage: React.FC = () => {
         ]
       }
     ]);
+    setQuizTitle('');
+    setQuizPassPercent(75);
+    setQuizTimeLimit(15);
+    setQuizMaxAttempts(3);
+    setQuizQuestions([
+      {
+        id: 'q-new-1',
+        question: 'Which of the following describes the key principle covered in this masterclass?',
+        options: [
+          'High Availability & Fault Tolerant Architecture',
+          'Single Point of Central Failure',
+          'Unindexed Relational Query Scans',
+          'Manual State Synchronization'
+        ],
+        correctIndex: 0,
+        explanation: 'Fault-tolerant architecture guarantees continuous operations despite intermittent component downtime.'
+      }
+    ]);
+    setQuizStats(null);
     setBuilderStep(1);
+  };
+
+  const loadCourseQuiz = async (courseId: string, titleHint: string) => {
+    setIsLoadingQuiz(true);
+    try {
+      const res = await api.getInstructorCourseQuiz(courseId);
+      if (res?.quiz) {
+        setQuizTitle(res.quiz.title || `${titleHint} Final Exam`);
+        setQuizPassPercent(res.quiz.passPercentage ?? 75);
+        setQuizTimeLimit(res.quiz.timeLimitMinutes ?? 15);
+        setQuizMaxAttempts(res.quiz.maxAttempts ?? 3);
+      }
+      if (res?.questions && res.questions.length > 0) {
+        setQuizQuestions(
+          res.questions.map((q: any) => ({
+            id: q.id,
+            question: q.question,
+            options: q.options || ['', '', '', ''],
+            correctIndex: q.correctIndex ?? 0,
+            explanation: q.explanation || ''
+          }))
+        );
+      } else {
+        setQuizQuestions([
+          {
+            id: 'q-new-1',
+            question: 'What is the primary core concept taught in this course?',
+            options: ['Production Resiliency', 'Uncached Read Stalls', 'Manual Schema Drifts', 'Unrestricted Root Access'],
+            correctIndex: 0,
+            explanation: 'Production resiliency ensures software systems remain performant under variable workload spikes.'
+          }
+        ]);
+      }
+      setQuizStats(res?.stats || null);
+    } catch (err) {
+      console.error('Failed to load course quiz:', err);
+    } finally {
+      setIsLoadingQuiz(false);
+    }
   };
 
   const handleOpenCreate = () => {
@@ -149,7 +246,7 @@ export const InstructorDashboardPage: React.FC = () => {
     setIsBuilderOpen(true);
   };
 
-  const handleOpenEdit = (course: any) => {
+  const handleOpenEdit = async (course: any) => {
     setEditingCourseId(course.id);
     setCourseTitle(course.title);
     setCourseCategory(course.categoryId);
@@ -162,6 +259,23 @@ export const InstructorDashboardPage: React.FC = () => {
     setCourseThumbnail(course.thumbnailUrl);
     setBuilderStep(1);
     setIsBuilderOpen(true);
+    await loadCourseQuiz(course.id, course.title);
+  };
+
+  const handleOpenQuizBuilder = async (course: any) => {
+    setEditingCourseId(course.id);
+    setCourseTitle(course.title);
+    setCourseCategory(course.categoryId);
+    setCourseLevel(course.level);
+    setCoursePrice(course.price);
+    setCourseShortDesc(course.shortDescription || '');
+    setCourseDesc(course.description || '');
+    setWhatYouLearnInput(course.whatYouWillLearn?.join('\n') || '');
+    setRequirementsInput(course.requirements?.join('\n') || '');
+    setCourseThumbnail(course.thumbnailUrl);
+    setBuilderStep(3); // jump directly to Quiz Builder step
+    setIsBuilderOpen(true);
+    await loadCourseQuiz(course.id, course.title);
   };
 
   const handleSaveCourse = () => {
@@ -288,7 +402,7 @@ export const InstructorDashboardPage: React.FC = () => {
           />
           <StatCard
             label="Estimated Earnings"
-            value={`$${stats.totalEarnings.toLocaleString()}`}
+            value={stats.totalEarnings === 0 ? '₹0' : `₹${stats.totalEarnings.toLocaleString('en-IN')}`}
             subtitle="80% revenue share"
             icon={<DollarSign className="w-5 h-5 text-emerald-500" />}
           />
@@ -344,6 +458,7 @@ export const InstructorDashboardPage: React.FC = () => {
                         <th className="px-5 py-3.5">Status</th>
                         <th className="px-5 py-3.5">Price</th>
                         <th className="px-5 py-3.5">Students</th>
+                        <th className="px-5 py-3.5">Certificates</th>
                         <th className="px-5 py-3.5">Rating</th>
                         <th className="px-5 py-3.5 text-right">Actions</th>
                       </tr>
@@ -385,11 +500,15 @@ export const InstructorDashboardPage: React.FC = () => {
                           </td>
 
                           <td className="px-5 py-4 font-mono font-semibold tabular-nums text-slate-900 dark:text-white">
-                            {course.price === 0 ? 'Free' : `$${course.price.toFixed(2)}`}
+                            {course.price === 0 ? 'Free' : `₹${Math.round(course.price).toLocaleString('en-IN')}`}
                           </td>
 
                           <td className="px-5 py-4 font-mono tabular-nums text-slate-600 dark:text-slate-400">
                             {course.aggregates?.enrollmentCount || 0}
+                          </td>
+
+                          <td className="px-5 py-4 font-mono tabular-nums text-slate-600 dark:text-slate-400">
+                            {course.certificatesIssued || 0}
                           </td>
 
                           <td className="px-5 py-4 font-mono tabular-nums text-slate-600 dark:text-slate-400">
@@ -407,6 +526,13 @@ export const InstructorDashboardPage: React.FC = () => {
                               >
                                 <Eye className="w-4 h-4" />
                               </a>
+                              <button
+                                onClick={() => handleOpenQuizBuilder(course)}
+                                className="p-1.5 text-amber-600 hover:text-amber-800 dark:text-amber-400 rounded-lg hover:bg-amber-50 dark:hover:bg-amber-950/50"
+                                title="Quiz Builder & Exam Stats"
+                              >
+                                <Award className="w-4 h-4" />
+                              </button>
                               <button
                                 onClick={() => handleOpenEdit(course)}
                                 className="p-1.5 text-indigo-600 hover:text-indigo-800 dark:text-indigo-400 rounded-lg hover:bg-indigo-50 dark:hover:bg-indigo-950/50"
@@ -552,7 +678,7 @@ export const InstructorDashboardPage: React.FC = () => {
                   {editingCourseId ? 'Edit Course Masterclass' : 'Create New Course Masterclass'}
                 </h2>
                 <p className="text-xs text-slate-500">
-                  Step {builderStep} of 3 · {builderStep === 1 ? 'Basic Details' : builderStep === 2 ? 'Curriculum Builder' : 'Review & Publish'}
+                  Step {builderStep} of 4 · {builderStep === 1 ? 'Basic Details & Pricing' : builderStep === 2 ? 'Curriculum Builder' : builderStep === 3 ? 'Certification Exam & Quiz' : 'Review & Publish'}
                 </p>
               </div>
               <button
@@ -563,7 +689,7 @@ export const InstructorDashboardPage: React.FC = () => {
               </button>
             </div>
 
-            {/* STEP 1: BASIC DETAILS */}
+            {/* STEP 1: BASIC DETAILS & PRICING */}
             {builderStep === 1 && (
               <div className="space-y-4 text-xs">
                 <div>
@@ -615,11 +741,12 @@ export const InstructorDashboardPage: React.FC = () => {
 
                   <div>
                     <label className="font-semibold text-slate-700 dark:text-slate-300 block mb-1">
-                      Price (USD)
+                      Price (₹ INR - 0 for Free)
                     </label>
                     <input
                       type="number"
-                      step="0.01"
+                      step="1"
+                      min="0"
                       value={coursePrice}
                       onChange={(e) => setCoursePrice(parseFloat(e.target.value) || 0)}
                       className="w-full p-2.5 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl text-slate-900 dark:text-white font-mono"
@@ -789,23 +916,305 @@ export const InstructorDashboardPage: React.FC = () => {
               </div>
             )}
 
-            {/* STEP 3: REVIEW & PUBLISH */}
+            {/* STEP 3: CERTIFICATION EXAM & QUIZ BUILDER (B) */}
             {builderStep === 3 && (
+              <div className="space-y-6 text-xs max-h-[55vh] overflow-y-auto pr-1">
+                {/* Live Quiz Performance Stats if existing course */}
+                {quizStats && (
+                  <div className="p-4 bg-indigo-50 dark:bg-indigo-950/40 rounded-2xl border border-indigo-200 dark:border-indigo-800/60 space-y-2">
+                    <div className="flex items-center gap-2 font-bold text-indigo-900 dark:text-indigo-200">
+                      <BarChart3 className="w-4 h-4 text-indigo-500" />
+                      <span>Live Exam Analytics & Performance</span>
+                    </div>
+                    <div className="grid grid-cols-3 gap-3 pt-1">
+                      <div className="p-2.5 bg-white dark:bg-slate-900 rounded-xl border border-indigo-100 dark:border-indigo-900/40">
+                        <div className="text-[10px] text-slate-400 uppercase font-semibold">Total Attempts</div>
+                        <div className="text-base font-bold text-slate-900 dark:text-white font-mono mt-0.5">
+                          {quizStats.totalAttempts}
+                        </div>
+                      </div>
+                      <div className="p-2.5 bg-white dark:bg-slate-900 rounded-xl border border-indigo-100 dark:border-indigo-900/40">
+                        <div className="text-[10px] text-slate-400 uppercase font-semibold">Average Score</div>
+                        <div className="text-base font-bold text-indigo-600 dark:text-indigo-400 font-mono mt-0.5">
+                          {quizStats.avgScore}%
+                        </div>
+                      </div>
+                      <div className="p-2.5 bg-white dark:bg-slate-900 rounded-xl border border-indigo-100 dark:border-indigo-900/40">
+                        <div className="text-[10px] text-slate-400 uppercase font-semibold">Pass Rate</div>
+                        <div className="text-base font-bold text-emerald-600 dark:text-emerald-400 font-mono mt-0.5">
+                          {quizStats.passRate}%
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* Exam Settings */}
+                <div className="p-4 bg-slate-50 dark:bg-slate-950 rounded-2xl border border-slate-200 dark:border-slate-800 space-y-4">
+                  <h3 className="font-bold text-slate-900 dark:text-white uppercase tracking-wider text-[11px] flex items-center gap-1.5">
+                    <Award className="w-4 h-4 text-amber-500" /> Exam Rules & Credentials Settings
+                  </h3>
+
+                  <div>
+                    <label className="font-semibold text-slate-700 dark:text-slate-300 block mb-1">
+                      Exam Title
+                    </label>
+                    <input
+                      type="text"
+                      value={quizTitle}
+                      onChange={(e) => setQuizTitle(e.target.value)}
+                      placeholder={`${courseTitle || 'Course'} Comprehensive Exam`}
+                      className="w-full p-2 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg text-slate-900 dark:text-white"
+                    />
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                    <div>
+                      <label className="font-semibold text-slate-700 dark:text-slate-300 block mb-1">
+                        Passing Threshold (%)
+                      </label>
+                      <input
+                        type="number"
+                        min="50"
+                        max="100"
+                        value={quizPassPercent}
+                        onChange={(e) => setQuizPassPercent(parseInt(e.target.value) || 75)}
+                        className="w-full p-2 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg text-slate-900 dark:text-white font-mono"
+                      />
+                    </div>
+                    <div>
+                      <label className="font-semibold text-slate-700 dark:text-slate-300 block mb-1">
+                        Time Limit (Minutes)
+                      </label>
+                      <input
+                        type="number"
+                        min="5"
+                        max="120"
+                        value={quizTimeLimit}
+                        onChange={(e) => setQuizTimeLimit(parseInt(e.target.value) || 15)}
+                        className="w-full p-2 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg text-slate-900 dark:text-white font-mono"
+                      />
+                    </div>
+                    <div>
+                      <label className="font-semibold text-slate-700 dark:text-slate-300 block mb-1">
+                        Max Retake Attempts
+                      </label>
+                      <input
+                        type="number"
+                        min="1"
+                        max="10"
+                        value={quizMaxAttempts}
+                        onChange={(e) => setQuizMaxAttempts(parseInt(e.target.value) || 3)}
+                        className="w-full p-2 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg text-slate-900 dark:text-white font-mono"
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                {/* Questions Management */}
+                <div className="space-y-4">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <h4 className="font-bold text-slate-900 dark:text-white uppercase tracking-wider text-[11px]">
+                        Exam Questions ({quizQuestions.length})
+                      </h4>
+                      <p className="text-[11px] text-slate-400">
+                        Each question requires 4 options, a designated correct answer, and an explanation.
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setQuizQuestions([
+                          ...quizQuestions,
+                          {
+                            id: `q-custom-${Date.now()}`,
+                            question: '',
+                            options: ['', '', '', ''],
+                            correctIndex: 0,
+                            explanation: ''
+                          }
+                        ]);
+                      }}
+                      className="px-3 py-1.5 bg-indigo-50 dark:bg-indigo-950/50 text-indigo-600 dark:text-indigo-400 hover:bg-indigo-100 rounded-lg font-semibold flex items-center gap-1"
+                    >
+                      <Plus className="w-3.5 h-3.5" />
+                      <span>Add Question</span>
+                    </button>
+                  </div>
+
+                  {quizQuestions.map((q, qIdx) => (
+                    <div
+                      key={q.id || qIdx}
+                      className="p-4 bg-slate-50 dark:bg-slate-950 rounded-2xl border border-slate-200 dark:border-slate-800 space-y-3"
+                    >
+                      <div className="flex items-center justify-between gap-2 border-b border-slate-200/80 dark:border-slate-800/80 pb-2">
+                        <span className="font-bold text-indigo-600 dark:text-indigo-400">
+                          Question #{qIdx + 1}
+                        </span>
+                        <div className="flex items-center gap-1">
+                          <button
+                            type="button"
+                            disabled={qIdx === 0}
+                            onClick={() => {
+                              if (qIdx > 0) {
+                                const copy = [...quizQuestions];
+                                const temp = copy[qIdx];
+                                copy[qIdx] = copy[qIdx - 1];
+                                copy[qIdx - 1] = temp;
+                                setQuizQuestions(copy);
+                              }
+                            }}
+                            className="p-1 text-slate-400 hover:text-slate-600 dark:hover:text-white disabled:opacity-30"
+                            title="Move Up"
+                          >
+                            <ChevronUp className="w-4 h-4" />
+                          </button>
+                          <button
+                            type="button"
+                            disabled={qIdx === quizQuestions.length - 1}
+                            onClick={() => {
+                              if (qIdx < quizQuestions.length - 1) {
+                                const copy = [...quizQuestions];
+                                const temp = copy[qIdx];
+                                copy[qIdx] = copy[qIdx + 1];
+                                copy[qIdx + 1] = temp;
+                                setQuizQuestions(copy);
+                              }
+                            }}
+                            className="p-1 text-slate-400 hover:text-slate-600 dark:hover:text-white disabled:opacity-30"
+                            title="Move Down"
+                          >
+                            <ChevronDown className="w-4 h-4" />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setQuizQuestions(quizQuestions.filter((_, i) => i !== qIdx));
+                            }}
+                            className="p-1 text-rose-500 hover:text-rose-700 ml-1"
+                            title="Delete Question"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </div>
+                      </div>
+
+                      <div>
+                        <label className="font-semibold text-slate-700 dark:text-slate-300 block mb-1">
+                          Prompt Text *
+                        </label>
+                        <input
+                          type="text"
+                          value={q.question}
+                          onChange={(e) => {
+                            const copy = [...quizQuestions];
+                            copy[qIdx].question = e.target.value;
+                            setQuizQuestions(copy);
+                          }}
+                          placeholder="What architectural pattern resolves this bottleneck?"
+                          className="w-full p-2 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg text-slate-900 dark:text-white"
+                        />
+                      </div>
+
+                      <div className="space-y-2">
+                        <label className="font-semibold text-slate-700 dark:text-slate-300 block">
+                          Options (Select the radio of the correct choice):
+                        </label>
+                        {q.options.map((opt, oIdx) => (
+                          <div key={oIdx} className="flex items-center gap-2">
+                            <input
+                              type="radio"
+                              name={`correct-${q.id || qIdx}`}
+                              checked={q.correctIndex === oIdx}
+                              onChange={() => {
+                                const copy = [...quizQuestions];
+                                copy[qIdx].correctIndex = oIdx;
+                                setQuizQuestions(copy);
+                              }}
+                              className="accent-emerald-600 w-4 h-4 cursor-pointer"
+                              title="Mark as correct answer"
+                            />
+                            <input
+                              type="text"
+                              value={opt}
+                              onChange={(e) => {
+                                const copy = [...quizQuestions];
+                                copy[qIdx].options[oIdx] = e.target.value;
+                                setQuizQuestions(copy);
+                              }}
+                              placeholder={`Option ${oIdx + 1}`}
+                              className="flex-1 p-1.5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg text-slate-900 dark:text-white"
+                            />
+                            {q.correctIndex === oIdx && (
+                              <span className="text-[10px] font-bold text-emerald-600 dark:text-emerald-400 shrink-0">
+                                Correct Answer
+                              </span>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+
+                      <div>
+                        <label className="font-semibold text-slate-700 dark:text-slate-300 block mb-1">
+                          Pedagogical Explanation (Shown after grading)
+                        </label>
+                        <input
+                          type="text"
+                          value={q.explanation}
+                          onChange={(e) => {
+                            const copy = [...quizQuestions];
+                            copy[qIdx].explanation = e.target.value;
+                            setQuizQuestions(copy);
+                          }}
+                          placeholder="Explain why this answer is theoretically and practically correct..."
+                          className="w-full p-2 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg text-slate-900 dark:text-white"
+                        />
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* STEP 4: REVIEW & PUBLISH */}
+            {builderStep === 4 && (
               <div className="space-y-4 text-xs">
-                <div className="p-4 bg-slate-50 dark:bg-slate-950 rounded-2xl border border-slate-200 dark:border-slate-800 space-y-2">
+                <div className="p-4 bg-slate-50 dark:bg-slate-950 rounded-2xl border border-slate-200 dark:border-slate-800 space-y-3">
                   <h3 className="font-bold text-sm text-slate-900 dark:text-white">{courseTitle || 'Untitled Course'}</h3>
                   <p className="text-slate-500">{courseShortDesc}</p>
-                  <div className="pt-2 flex items-center gap-4 text-slate-600 dark:text-slate-400 font-mono">
-                    <span>Price: ${coursePrice.toFixed(2)}</span>
-                    <span>Level: {courseLevel}</span>
-                    <span>Sections: {sectionsState.length}</span>
-                    <span>Total Lessons: {sectionsState.reduce((acc, s) => acc + s.lessons.length, 0)}</span>
+                  
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 pt-2 text-slate-600 dark:text-slate-400 font-mono">
+                    <div className="p-2 bg-white dark:bg-slate-900 rounded-lg border border-slate-200/80 dark:border-slate-800">
+                      <div className="text-[10px] text-slate-400">Price</div>
+                      <div className="font-bold text-slate-900 dark:text-white mt-0.5">
+                        {coursePrice === 0 ? 'Free' : `₹${coursePrice}`}
+                      </div>
+                    </div>
+                    <div className="p-2 bg-white dark:bg-slate-900 rounded-lg border border-slate-200/80 dark:border-slate-800">
+                      <div className="text-[10px] text-slate-400">Curriculum</div>
+                      <div className="font-bold text-slate-900 dark:text-white mt-0.5">
+                        {sectionsState.reduce((acc, s) => acc + s.lessons.length, 0)} Lessons
+                      </div>
+                    </div>
+                    <div className="p-2 bg-white dark:bg-slate-900 rounded-lg border border-slate-200/80 dark:border-slate-800">
+                      <div className="text-[10px] text-slate-400">Exam Pass Mark</div>
+                      <div className="font-bold text-slate-900 dark:text-white mt-0.5">
+                        {quizPassPercent}%
+                      </div>
+                    </div>
+                    <div className="p-2 bg-white dark:bg-slate-900 rounded-lg border border-slate-200/80 dark:border-slate-800">
+                      <div className="text-[10px] text-slate-400">Questions</div>
+                      <div className="font-bold text-slate-900 dark:text-white mt-0.5">
+                        {quizQuestions.length} MCQs
+                      </div>
+                    </div>
                   </div>
                 </div>
 
                 <div className="p-3 bg-indigo-50 dark:bg-indigo-950/40 rounded-xl text-indigo-700 dark:text-indigo-300 flex items-center gap-2">
                   <CheckCircle className="w-4 h-4 shrink-0" />
-                  <span>Submitting this course will mark it as Pending for platform administrator moderation.</span>
+                  <span>Submitting this course will save all curriculum modules and exam questions for administrator moderation.</span>
                 </div>
               </div>
             )}
@@ -824,7 +1233,7 @@ export const InstructorDashboardPage: React.FC = () => {
                 <div />
               )}
 
-              {builderStep < 3 ? (
+              {builderStep < 4 ? (
                 <button
                   type="button"
                   disabled={!courseTitle.trim() || !courseDesc.trim()}

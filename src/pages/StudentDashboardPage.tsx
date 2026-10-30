@@ -254,9 +254,17 @@ export const StudentDashboardPage: React.FC = () => {
                             className="w-full h-full object-cover"
                             referrerPolicy="no-referrer"
                           />
-                          <div className="absolute top-2 right-2 px-2 py-1 bg-emerald-600 text-white text-[10px] font-bold rounded-md flex items-center gap-1 shadow-sm">
-                            <CheckCircle2 className="w-3 h-3" />
-                            Completed
+                          <div className="absolute top-2 right-2 flex flex-col gap-1 items-end">
+                            <span className="px-2 py-1 bg-emerald-600 text-white text-[10px] font-bold rounded-md flex items-center gap-1 shadow-sm">
+                              <CheckCircle2 className="w-3 h-3" />
+                              Completed
+                            </span>
+                            {item.enrollment.certificateId && (
+                              <span className="px-2 py-0.5 bg-amber-500 text-white text-[10px] font-bold rounded-md flex items-center gap-1 shadow-sm">
+                                <Award className="w-3 h-3" />
+                                Certificate earned
+                              </span>
+                            )}
                           </div>
                         </div>
 

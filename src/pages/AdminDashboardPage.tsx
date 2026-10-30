@@ -18,7 +18,11 @@ import {
   FolderPlus,
   RotateCcw,
   Search,
-  Eye
+  Eye,
+  Award,
+  ShieldAlert,
+  Calendar,
+  ExternalLink
 } from 'lucide-react';
 import {
   ResponsiveContainer,
@@ -34,9 +38,16 @@ import {
 
 export const AdminDashboardPage: React.FC = () => {
   const queryClient = useQueryClient();
-  const [activeTab, setActiveTab] = useState<'moderation' | 'users' | 'categories' | 'analytics'>('moderation');
+  const [activeTab, setActiveTab] = useState<'moderation' | 'users' | 'certificates' | 'categories' | 'analytics'>('moderation');
   const [userSearch, setUserSearch] = useState('');
   const [userRoleFilter, setUserRoleFilter] = useState<string>('all');
+
+  // Certificate management state (A.8)
+  const [certSearch, setCertSearch] = useState('');
+  const [certCourseFilter, setCertCourseFilter] = useState('all');
+  const [certStatusFilter, setCertStatusFilter] = useState<'all' | 'active' | 'revoked'>('all');
+  const [certToRevoke, setCertToRevoke] = useState<any | null>(null);
+  const [revokeReason, setRevokeReason] = useState('Academic compliance review');
 
   // Category creation state
   const [newCatName, setNewCatName] = useState('');
@@ -67,7 +78,27 @@ export const AdminDashboardPage: React.FC = () => {
     queryFn: () => api.getCategories()
   });
 
+  const { data: adminCertificates, isLoading: isCertificatesLoading } = useQuery({
+    queryKey: ['adminCertificates'],
+    queryFn: () => api.getAdminCertificates()
+  });
+
   // Mutations
+  const revokeCertMutation = useMutation({
+    mutationFn: ({ code, reason }: { code: string; reason: string }) => api.revokeCertificate(code, reason),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['adminCertificates'] });
+      setCertToRevoke(null);
+    }
+  });
+
+  const restoreCertMutation = useMutation({
+    mutationFn: (code: string) => api.restoreCertificate(code),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['adminCertificates'] });
+    }
+  });
+
   const updateStatusMutation = useMutation({
     mutationFn: ({ id, status }: { id: string; status: string }) => api.updateCourseStatus(id, status),
     onSuccess: () => {
@@ -158,13 +189,15 @@ export const AdminDashboardPage: React.FC = () => {
             </p>
           </div>
 
-          <button
-            onClick={() => setResetDbConfirmOpen(true)}
-            className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-semibold text-rose-600 dark:text-rose-400 bg-rose-50 dark:bg-rose-950/40 hover:bg-rose-100 rounded-xl transition-colors border border-rose-200 dark:border-rose-900/60 shrink-0"
-          >
-            <RotateCcw className="w-3.5 h-3.5" />
-            <span>Restore Fresh Seed DB</span>
-          </button>
+          {import.meta.env.VITE_DEMO_MODE === 'true' && (
+            <button
+              onClick={() => setResetDbConfirmOpen(true)}
+              className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-semibold text-rose-600 dark:text-rose-400 bg-rose-50 dark:bg-rose-950/40 hover:bg-rose-100 rounded-xl transition-colors border border-rose-200 dark:border-rose-900/60 shrink-0"
+            >
+              <RotateCcw className="w-3.5 h-3.5" />
+              <span>Restore Fresh Seed DB</span>
+            </button>
+          )}
         </div>
 
         {/* STATS STRIP */}
@@ -189,7 +222,7 @@ export const AdminDashboardPage: React.FC = () => {
           />
           <StatCard
             label="Platform Gross Revenue"
-            value={`$${stats.totalRevenue.toLocaleString()}`}
+            value={`₹${stats.totalRevenue.toLocaleString('en-IN')}`}
             subtitle="Aggregated transaction volume"
             icon={<DollarSign className="w-5 h-5 text-amber-500" />}
           />
@@ -217,6 +250,17 @@ export const AdminDashboardPage: React.FC = () => {
               }`}
             >
               User Management ({adminUsers?.length || 0})
+            </button>
+            <button
+              onClick={() => setActiveTab('certificates')}
+              className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition-colors flex items-center gap-1.5 ${
+                activeTab === 'certificates'
+                  ? 'bg-indigo-600 text-white'
+                  : 'text-slate-600 dark:text-slate-400 hover:text-slate-900'
+              }`}
+            >
+              <Award className="w-3.5 h-3.5" />
+              <span>Certificates ({adminCertificates?.length || 0})</span>
             </button>
             <button
               onClick={() => setActiveTab('analytics')}
@@ -461,7 +505,184 @@ export const AdminDashboardPage: React.FC = () => {
             </div>
           )}
 
-          {/* TAB 3: ANALYTICS & TRENDS (RECHARTS) */}
+          {/* TAB: ACCREDITED CERTIFICATES (A.8) */}
+          {activeTab === 'certificates' && (
+            <div className="space-y-6">
+              
+              {/* Search & Filter Controls */}
+              <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200/90 dark:border-slate-800/90 p-4 shadow-xs flex flex-col md:flex-row items-center justify-between gap-4">
+                
+                <div className="relative w-full md:w-80">
+                  <Search className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
+                  <input
+                    type="text"
+                    value={certSearch}
+                    onChange={(e) => setCertSearch(e.target.value)}
+                    placeholder="Search by code, scholar name, or email..."
+                    className="w-full pl-9 pr-3 py-1.5 text-xs bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg text-slate-900 dark:text-white placeholder:text-slate-400 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                  />
+                </div>
+
+                <div className="flex flex-wrap items-center gap-3 w-full md:w-auto">
+                  {/* Course Filter */}
+                  <select
+                    value={certCourseFilter}
+                    onChange={(e) => setCertCourseFilter(e.target.value)}
+                    className="bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg px-3 py-1.5 text-xs text-slate-900 dark:text-white"
+                  >
+                    <option value="all">All Courses</option>
+                    {adminCourses?.map((c) => (
+                      <option key={c.id} value={c.id}>
+                        {c.title}
+                      </option>
+                    ))}
+                  </select>
+
+                  {/* Status Filter */}
+                  <select
+                    value={certStatusFilter}
+                    onChange={(e) => setCertStatusFilter(e.target.value as any)}
+                    className="bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg px-3 py-1.5 text-xs text-slate-900 dark:text-white"
+                  >
+                    <option value="all">All Statuses</option>
+                    <option value="active">Active & Verified</option>
+                    <option value="revoked">Revoked</option>
+                  </select>
+                </div>
+
+              </div>
+
+              {/* Certificates Table */}
+              <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200/90 dark:border-slate-800/90 overflow-hidden shadow-xs">
+                {isCertificatesLoading ? (
+                  <div className="p-8 text-center text-xs text-slate-500">
+                    Loading credentials registry...
+                  </div>
+                ) : (adminCertificates || []).length === 0 ? (
+                  <div className="p-8 text-center text-xs text-slate-500">
+                    No certificates have been issued yet.
+                  </div>
+                ) : (
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-left text-xs">
+                      <thead className="bg-slate-50 dark:bg-slate-800/50 text-slate-500 uppercase tracking-wider text-[11px] border-b border-slate-100 dark:border-slate-800">
+                        <tr>
+                          <th className="px-5 py-3.5">Certificate Code</th>
+                          <th className="px-5 py-3.5">Student / Recipient</th>
+                          <th className="px-5 py-3.5">Accredited Course</th>
+                          <th className="px-5 py-3.5">Issued Date</th>
+                          <th className="px-5 py-3.5">Status</th>
+                          <th className="px-5 py-3.5 text-right">Administrative Actions</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                        {(adminCertificates || [])
+                          .filter((cert) => {
+                            const query = certSearch.toLowerCase().trim();
+                            const matchesSearch =
+                              !query ||
+                              cert.code.toLowerCase().includes(query) ||
+                              cert.studentName.toLowerCase().includes(query) ||
+                              cert.studentEmail.toLowerCase().includes(query) ||
+                              cert.courseTitle.toLowerCase().includes(query);
+                            const matchesCourse = certCourseFilter === 'all' || cert.courseId === certCourseFilter;
+                            const matchesStatus =
+                              certStatusFilter === 'all' ||
+                              (certStatusFilter === 'active' && !cert.revoked) ||
+                              (certStatusFilter === 'revoked' && cert.revoked);
+                            return matchesSearch && matchesCourse && matchesStatus;
+                          })
+                          .map((cert) => (
+                            <tr key={cert.id} className="hover:bg-slate-50/50 dark:hover:bg-slate-800/30">
+                              <td className="px-5 py-4 font-mono font-bold text-indigo-600 dark:text-indigo-400">
+                                <a
+                                  href={`/certificate/${cert.code}`}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="hover:underline flex items-center gap-1"
+                                >
+                                  <span>{cert.code}</span>
+                                  <ExternalLink className="w-3 h-3 opacity-60" />
+                                </a>
+                              </td>
+
+                              <td className="px-5 py-4">
+                                <div className="font-bold text-slate-900 dark:text-white">
+                                  {cert.studentName}
+                                </div>
+                                <div className="text-[11px] text-slate-400 font-mono">
+                                  {cert.studentEmail}
+                                </div>
+                              </td>
+
+                              <td className="px-5 py-4 text-slate-700 dark:text-slate-300 max-w-xs truncate">
+                                {cert.courseTitle}
+                              </td>
+
+                              <td className="px-5 py-4 text-slate-500 font-mono text-[11px]">
+                                {new Date(cert.issuedAt).toLocaleDateString()}
+                              </td>
+
+                              <td className="px-5 py-4">
+                                {cert.revoked ? (
+                                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider bg-rose-50 text-rose-700 dark:bg-rose-950/60 dark:text-rose-400">
+                                    <ShieldAlert className="w-3 h-3" />
+                                    Revoked
+                                  </span>
+                                ) : (
+                                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider bg-emerald-50 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-400">
+                                    <CheckCircle className="w-3 h-3" />
+                                    Active
+                                  </span>
+                                )}
+                                {cert.revoked && cert.revokedReason && (
+                                  <div className="text-[10px] text-rose-500 mt-0.5 truncate max-w-xs">
+                                    {cert.revokedReason}
+                                  </div>
+                                )}
+                              </td>
+
+                              <td className="px-5 py-4 text-right">
+                                <div className="flex items-center justify-end gap-2">
+                                  <a
+                                    href={`/verify/${cert.code}`}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="px-2.5 py-1 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg text-[11px] font-semibold transition-colors"
+                                  >
+                                    Verify
+                                  </a>
+
+                                  {cert.revoked ? (
+                                    <button
+                                      onClick={() => restoreCertMutation.mutate(cert.code)}
+                                      disabled={restoreCertMutation.isPending}
+                                      className="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-[11px] font-semibold transition-colors disabled:opacity-50"
+                                    >
+                                      Restore
+                                    </button>
+                                  ) : (
+                                    <button
+                                      onClick={() => setCertToRevoke(cert)}
+                                      className="px-2.5 py-1 bg-rose-50 hover:bg-rose-100 text-rose-700 dark:bg-rose-950/50 dark:hover:bg-rose-900/50 dark:text-rose-300 border border-rose-200 dark:border-rose-900/50 rounded-lg text-[11px] font-semibold transition-colors"
+                                    >
+                                      Revoke
+                                    </button>
+                                  )}
+                                </div>
+                              </td>
+                            </tr>
+                          ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+
+            </div>
+          )}
+
+          {/* TAB 4: ANALYTICS & TRENDS (RECHARTS) */}
           {activeTab === 'analytics' && (
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
               
@@ -653,13 +874,68 @@ export const AdminDashboardPage: React.FC = () => {
         onCancel={() => setUserToDelete(null)}
       />
 
-      {/* CONFIRM RESET DATABASE DIALOG */}
+      {/* REVOKE CERTIFICATE DIALOG (A.8) */}
+      {certToRevoke && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-xs animate-in fade-in">
+          <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-6 max-w-md w-full shadow-2xl space-y-4">
+            <div className="flex items-start gap-3">
+              <div className="w-10 h-10 rounded-xl bg-rose-50 dark:bg-rose-950/40 text-rose-600 dark:text-rose-400 flex items-center justify-center shrink-0">
+                <ShieldAlert className="w-5 h-5" />
+              </div>
+              <div>
+                <h3 className="text-base font-bold text-slate-900 dark:text-white">
+                  Revoke Certificate {certToRevoke.code}?
+                </h3>
+                <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
+                  Recipient: <strong className="text-slate-700 dark:text-slate-300">{certToRevoke.studentName}</strong>
+                </p>
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                Revocation Reason (Recorded on public registry)
+              </label>
+              <textarea
+                rows={3}
+                value={revokeReason}
+                onChange={(e) => setRevokeReason(e.target.value)}
+                placeholder="Enter official justification..."
+                className="w-full p-2.5 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl text-xs text-slate-900 dark:text-white focus:outline-none focus:ring-1 focus:ring-rose-500"
+              />
+            </div>
+
+            <div className="flex items-center justify-end gap-3 pt-2">
+              <button
+                type="button"
+                onClick={() => setCertToRevoke(null)}
+                className="px-4 py-2 text-xs font-semibold text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() =>
+                  revokeCertMutation.mutate({ code: certToRevoke.code, reason: revokeReason })
+                }
+                disabled={revokeCertMutation.isPending || !revokeReason.trim()}
+                className="px-4 py-2 text-xs font-semibold text-white bg-rose-600 hover:bg-rose-700 rounded-lg disabled:opacity-50"
+              >
+                {revokeCertMutation.isPending ? 'Revoking...' : 'Confirm Revocation'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* CONFIRM RESET DATABASE DIALOG (D.3: requires typing RESET) */}
       <ConfirmDialog
         isOpen={resetDbConfirmOpen}
         title="Reset Entire Database to Seed State?"
-        message="This will re-initialize the verified seed dataset: 1 admin, 2 instructors, 3 students, 8 published courses with 96 lessons, sample reviews, and certificates. Any newly created test records will be refreshed."
+        message="This will re-initialize the verified seed dataset: 1 admin, 2 instructors, 3 students, 42 published courses with lessons, sample reviews, and certificates. Any newly created test records will be refreshed."
         confirmText="Reset Database to Seed"
         confirmVariant="danger"
+        requireConfirmationText="RESET"
         onConfirm={() => resetDbMutation.mutate()}
         onCancel={() => setResetDbConfirmOpen(false)}
       />

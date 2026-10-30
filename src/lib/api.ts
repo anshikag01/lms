@@ -274,7 +274,22 @@ export const api = {
 
   // Certificate Verification & Admin
   verifyCertificate: (code: string) =>
-    fetchApi<CertificateData & { valid: boolean; code: string; revoked?: boolean; revokedReason?: string }>(`/api/verify/${encodeURIComponent(code)}`),
+    fetchApi<CertificateData & { valid: boolean; code: string; revoked?: boolean; revokedAt?: string; revokedReason?: string }>(`/api/verify/${encodeURIComponent(code)}`),
+
+  getAdminCertificates: () =>
+    fetchApi<{
+      id: string;
+      code: string;
+      userId: string;
+      courseId: string;
+      studentName: string;
+      studentEmail: string;
+      courseTitle: string;
+      issuedAt: string;
+      revoked: boolean;
+      revokedAt?: string;
+      revokedReason?: string;
+    }[]>('/api/admin/certificates'),
 
   revokeCertificate: (code: string, reason?: string) =>
     fetchApi<{ success: boolean; message: string; certificate: any }>(`/api/admin/certificates/${encodeURIComponent(code)}/revoke`, {
@@ -286,6 +301,31 @@ export const api = {
     fetchApi<{ success: boolean; message: string; certificate: any }>(`/api/admin/certificates/${encodeURIComponent(code)}/restore`, {
       method: 'PUT'
     }),
+
+  getInstructorCourseQuiz: (courseId: string) =>
+    fetchApi<{
+      quiz: any;
+      questions: any[];
+      stats: { totalAttempts: number; avgScore: number; passRate: number };
+    }>(`/api/instructor/courses/${courseId}/quiz`),
+
+  updateInstructorCourseQuiz: (
+    courseId: string,
+    payload: {
+      title?: string;
+      passPercentage?: number;
+      timeLimitMinutes?: number;
+      maxAttempts?: number;
+      questions?: any[];
+    }
+  ) =>
+    fetchApi<{ success: boolean; quiz: any; questions: any[] }>(
+      `/api/instructor/courses/${courseId}/quiz`,
+      {
+        method: 'PUT',
+        body: JSON.stringify(payload)
+      }
+    ),
 
   resetDatabase: (confirmation = 'RESET') =>
     fetchApi<{ success: boolean; message: string }>('/api/admin/reset-database', {

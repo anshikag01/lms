@@ -609,37 +609,83 @@ export const LessonPlayerPage: React.FC = () => {
             ))}
           </div>
 
-          {/* Quiz Action Card at bottom of sidebar */}
-          {data.quiz && (
-            <div className="p-4 mt-auto border-t border-slate-800 bg-slate-950/40">
-              <div className="p-3 bg-indigo-950/40 rounded-xl border border-indigo-800/40 text-center space-y-2">
-                <Award className="w-5 h-5 text-amber-400 mx-auto" />
-                <h4 className="text-xs font-bold text-white">Final Certification Exam</h4>
-                <p className="text-[11px] text-slate-400">
-                  Pass with 80%+ score to earn your accredited credentials.
-                </p>
+          {/* Certificate & Quiz Action Section in Sidebar (A.7) */}
+          <div className="p-4 mt-auto border-t border-slate-800 bg-slate-950/40 space-y-3">
+            {data.enrollment?.certificateId ? (
+              <div className="p-3 bg-emerald-950/40 rounded-xl border border-emerald-500/30 text-center space-y-2">
+                <div className="w-8 h-8 rounded-full bg-emerald-500/20 text-emerald-400 flex items-center justify-center mx-auto">
+                  <Award className="w-4 h-4" />
+                </div>
+                <div>
+                  <div className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/20 text-emerald-300">
+                    <Check className="w-3 h-3" /> Certificate Earned
+                  </div>
+                  <h4 className="text-xs font-bold text-white mt-1">Official Credential Issued</h4>
+                  <p className="text-[10px] text-slate-400">Credential code: {data.enrollment.certificateId}</p>
+                </div>
                 <Link
-                  to={`/learn/${courseSlug}/quiz`}
-                  className="block w-full py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold rounded-lg transition-colors"
+                  to={`/certificate/${data.enrollment.certificateId}`}
+                  className="block w-full py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold rounded-lg transition-colors shadow-sm"
                 >
-                  Take Quiz Now
+                  View Certificate
                 </Link>
               </div>
-            </div>
-          )}
+            ) : totalCount - completedCount > 0 ? (
+              <div className="p-3 bg-slate-950/80 rounded-xl border border-slate-800 text-center space-y-2">
+                <div className="w-8 h-8 rounded-full bg-slate-800 text-slate-400 flex items-center justify-center mx-auto">
+                  <Lock className="w-4 h-4" />
+                </div>
+                <div>
+                  <h4 className="text-xs font-bold text-white">Certificate Locked</h4>
+                  <p className="text-[11px] text-amber-400 font-medium mt-0.5">
+                    Complete {totalCount - completedCount} more lesson{totalCount - completedCount === 1 ? '' : 's'}
+                    {data.quiz ? ' & pass final quiz' : ''} to unlock
+                  </p>
+                </div>
+                <div className="w-full bg-slate-800 rounded-full h-1.5 overflow-hidden">
+                  <div
+                    className="bg-indigo-500 h-1.5 rounded-full transition-all duration-300"
+                    style={{ width: `${progressPercent}%` }}
+                  />
+                </div>
+              </div>
+            ) : (
+              <div className="p-3 bg-amber-950/40 rounded-xl border border-amber-500/30 text-center space-y-2">
+                <div className="w-8 h-8 rounded-full bg-amber-500/20 text-amber-400 flex items-center justify-center mx-auto">
+                  <Award className="w-4 h-4" />
+                </div>
+                <div>
+                  <h4 className="text-xs font-bold text-white">Almost Certified!</h4>
+                  <p className="text-[11px] text-amber-300 font-medium mt-0.5">
+                    Pass the final quiz to unlock your certificate
+                  </p>
+                </div>
+                {data.quiz && (
+                  <Link
+                    to={`/learn/${courseSlug}/quiz`}
+                    className="block w-full py-1.5 bg-amber-600 hover:bg-amber-500 text-white text-xs font-bold rounded-lg transition-colors shadow-sm"
+                  >
+                    Take Quiz
+                  </Link>
+                )}
+              </div>
+            )}
+          </div>
 
         </div>
 
       </div>
 
-      {/* 100% COMPLETION CELEBRATION MODAL */}
+      {/* 100% COMPLETION CELEBRATION MODAL (A.5) */}
       {showCelebration && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in">
           <div className="bg-slate-900 border border-slate-800 p-8 rounded-2xl max-w-md w-full text-center space-y-4 shadow-2xl">
             <div className="w-16 h-16 rounded-full bg-amber-500/20 text-amber-400 flex items-center justify-center mx-auto">
               <Award className="w-8 h-8" />
             </div>
-            <h3 className="text-xl font-bold text-white">Congratulations!</h3>
+            <h3 className="text-xl font-bold text-white">
+              {data.enrollment?.certificateId ? 'Certificate Earned!' : 'All Lessons Completed!'}
+            </h3>
             <p className="text-xs text-slate-300 leading-relaxed">
               You have completed 100% of the lessons in <span className="font-semibold text-white">{data.course.title}</span>!
             </p>
@@ -647,18 +693,21 @@ export const LessonPlayerPage: React.FC = () => {
               <div className="pt-2">
                 <Link
                   to={`/certificate/${data.enrollment.certificateId}`}
-                  className="inline-block px-5 py-2.5 bg-gradient-to-r from-amber-500 to-amber-600 text-white text-xs font-bold rounded-xl shadow-lg"
+                  className="inline-block px-5 py-2.5 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-600 hover:to-amber-700 text-white text-xs font-bold rounded-xl shadow-lg transition-all"
                 >
                   View Your Official Certificate
                 </Link>
               </div>
             ) : (
-              <div className="pt-2">
+              <div className="pt-2 space-y-2">
+                <p className="text-xs text-amber-400 font-medium">
+                  Pass the final quiz to unlock your certificate
+                </p>
                 <Link
                   to={`/learn/${courseSlug}/quiz`}
-                  className="inline-block px-5 py-2.5 bg-indigo-600 text-white text-xs font-bold rounded-xl shadow-lg"
+                  className="inline-block px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold rounded-xl shadow-lg transition-all"
                 >
-                  Pass the Final Exam to Unlock Certificate
+                  Take Quiz
                 </Link>
               </div>
             )}

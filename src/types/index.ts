@@ -51,6 +51,7 @@ export interface Course {
   aggregates?: CourseAggregates;
   instructor?: Profile;
   category?: Category;
+  certificatesIssued?: number;
 }
 
 export interface Lesson {
@@ -97,6 +98,8 @@ export interface Quiz {
   courseId: string;
   title: string;
   passPercentage: number;
+  timeLimitMinutes?: number;
+  maxAttempts?: number;
 }
 
 export interface QuizQuestion {
@@ -142,6 +145,7 @@ export interface CertificateRecord {
 export interface CertificateData {
   certificateId: string;
   code?: string;
+  ownerId?: string;
   issuedAt: string;
   studentName: string;
   courseTitle: string;
@@ -150,6 +154,7 @@ export interface CertificateData {
   totalDurationMinutes: number;
   totalLessons: number;
   revoked?: boolean;
+  revokedAt?: string;
   revokedReason?: string;
 }
 
