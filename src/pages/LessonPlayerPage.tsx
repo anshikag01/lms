@@ -22,8 +22,11 @@ import {
   Check,
   Save,
   HelpCircle,
-  FolderDown
+  FolderDown,
+  ExternalLink,
+  Sparkles
 } from 'lucide-react';
+import { ChatBot } from '../components/ChatBot';
 
 export const LessonPlayerPage: React.FC = () => {
   const { courseSlug, lessonId: paramLessonId } = useParams<{ courseSlug: string; lessonId?: string }>();
@@ -33,7 +36,7 @@ export const LessonPlayerPage: React.FC = () => {
 
   const [activeLessonId, setActiveLessonId] = useState<string | null>(paramLessonId || null);
   const [sidebarOpen, setSidebarOpen] = useState(true);
-  const [activeTab, setActiveTab] = useState<'overview' | 'notes' | 'resources'>('overview');
+  const [activeTab, setActiveTab] = useState<'overview' | 'notes' | 'resources' | 'ask-ai'>('overview');
   const [currentNote, setCurrentNote] = useState<string>('');
   const [noteSaved, setNoteSaved] = useState(false);
   const [showCelebration, setShowCelebration] = useState(false);
@@ -324,6 +327,20 @@ export const LessonPlayerPage: React.FC = () => {
                 <span>Next</span>
                 <ChevronRight className="w-4 h-4" />
               </button>
+
+              {/* YouTube Fallback Button */}
+              {currentLesson?.videoUrl && (
+                <a
+                  href={currentLesson.videoUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="px-3 py-2 text-xs font-medium text-slate-300 hover:text-white bg-slate-800/90 hover:bg-slate-800 rounded-lg transition-colors flex items-center gap-1.5 border border-slate-700/50"
+                  title="Open video on YouTube"
+                >
+                  <ExternalLink className="w-3.5 h-3.5 text-rose-400" />
+                  <span className="hidden sm:inline">Open on YouTube</span>
+                </a>
+              )}
             </div>
           </div>
 
@@ -331,7 +348,7 @@ export const LessonPlayerPage: React.FC = () => {
           <div className="p-4 sm:p-6 space-y-6">
             
             {/* Tab buttons */}
-            <div className="flex items-center gap-2 border-b border-slate-800 pb-3">
+            <div className="flex flex-wrap items-center gap-2 border-b border-slate-800 pb-3">
               <button
                 onClick={() => setActiveTab('overview')}
                 className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition-colors ${
@@ -361,6 +378,17 @@ export const LessonPlayerPage: React.FC = () => {
                 }`}
               >
                 Exercise Resources
+              </button>
+              <button
+                onClick={() => setActiveTab('ask-ai')}
+                className={`px-3 py-1.5 text-xs font-semibold rounded-lg flex items-center gap-1.5 transition-colors ${
+                  activeTab === 'ask-ai'
+                    ? 'bg-gradient-to-r from-indigo-600 to-violet-600 text-white shadow-xs'
+                    : 'text-indigo-400 hover:text-indigo-300 hover:bg-indigo-950/40 border border-indigo-500/30'
+                }`}
+              >
+                <Sparkles className="w-3.5 h-3.5 text-amber-400" />
+                <span>Ask LearnHub AI</span>
               </button>
             </div>
 
@@ -439,6 +467,18 @@ export const LessonPlayerPage: React.FC = () => {
                     <FileText className="w-4 h-4 text-slate-400" />
                   </a>
                 </div>
+              </div>
+            )}
+
+            {/* TAB: ASK AI (Embedded Context-Aware Tutor) */}
+            {activeTab === 'ask-ai' && (
+              <div className="max-w-4xl">
+                <ChatBot
+                  embedded
+                  courseId={data.course.id}
+                  lessonId={currentLesson?.id}
+                  lessonTitle={currentLesson?.title}
+                />
               </div>
             )}
 

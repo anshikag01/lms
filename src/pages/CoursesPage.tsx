@@ -11,7 +11,9 @@ import {
   X,
   SlidersHorizontal,
   RotateCcw,
-  BookOpen
+  BookOpen,
+  ChevronLeft,
+  ChevronRight
 } from 'lucide-react';
 
 export const CoursesPage: React.FC = () => {
@@ -76,6 +78,9 @@ export const CoursesPage: React.FC = () => {
       })
   });
 
+  const ITEMS_PER_PAGE = 9;
+  const currentPage = Math.max(1, parseInt(searchParams.get('page') || '1', 10));
+
   const updateParam = (key: string, value: string) => {
     const newParams = new URLSearchParams(searchParams);
     if (value === 'all' || !value) {
@@ -83,7 +88,22 @@ export const CoursesPage: React.FC = () => {
     } else {
       newParams.set(key, value);
     }
+    // Reset to page 1 on filter modification
+    if (key !== 'page') {
+      newParams.delete('page');
+    }
     setSearchParams(newParams);
+  };
+
+  const setPage = (pageNumber: number) => {
+    const newParams = new URLSearchParams(searchParams);
+    if (pageNumber <= 1) {
+      newParams.delete('page');
+    } else {
+      newParams.set('page', pageNumber.toString());
+    }
+    setSearchParams(newParams);
+    window.scrollTo({ top: 120, behavior: 'smooth' });
   };
 
   const clearAllFilters = () => {
@@ -91,6 +111,13 @@ export const CoursesPage: React.FC = () => {
     setDebouncedSearch('');
     setSearchParams(new URLSearchParams());
   };
+
+  const totalCoursesCount = courses?.length || 0;
+  const totalPages = Math.ceil(totalCoursesCount / ITEMS_PER_PAGE) || 1;
+  const validCurrentPage = Math.min(currentPage, totalPages);
+  const startIndex = (validCurrentPage - 1) * ITEMS_PER_PAGE;
+  const endIndex = Math.min(startIndex + ITEMS_PER_PAGE, totalCoursesCount);
+  const paginatedCourses = courses?.slice(startIndex, endIndex) || [];
 
   const hasActiveFilters =
     debouncedSearch ||
@@ -362,8 +389,15 @@ export const CoursesPage: React.FC = () => {
             {/* Results count strip */}
             <div className="flex items-center justify-between text-xs text-slate-500 dark:text-slate-400 mb-4">
               <span>
-                Showing <strong className="text-slate-900 dark:text-white font-mono tabular-nums">{courses?.length || 0}</strong> courses
+                Showing <strong className="text-slate-900 dark:text-white font-mono tabular-nums">
+                  {totalCoursesCount > 0 ? `${startIndex + 1}–${endIndex}` : '0'}
+                </strong> of <strong className="text-slate-900 dark:text-white font-mono tabular-nums">{totalCoursesCount}</strong> courses
               </span>
+              {totalPages > 1 && (
+                <span className="text-[11px] font-medium text-slate-400">
+                  Page {validCurrentPage} of {totalPages}
+                </span>
+              )}
             </div>
 
             {/* Error State */}
@@ -402,12 +436,76 @@ export const CoursesPage: React.FC = () => {
             )}
 
             {/* Success State */}
-            {!isLoading && !isError && courses && courses.length > 0 && (
-              <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
-                {courses.map((course) => (
-                  <CourseCard key={course.id} course={course} />
-                ))}
-              </div>
+            {!isLoading && !isError && paginatedCourses.length > 0 && (
+              <>
+                <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
+                  {paginatedCourses.map((course) => (
+                    <CourseCard key={course.id} course={course} />
+                  ))}
+                </div>
+
+                {/* PAGINATION CONTROLS */}
+                {totalPages > 1 && (
+                  <div className="mt-10 flex flex-col sm:flex-row items-center justify-between gap-4 pt-6 border-t border-slate-200 dark:border-slate-800">
+                    <p className="text-xs text-slate-500 dark:text-slate-400">
+                      Page <span className="font-semibold text-slate-900 dark:text-white">{validCurrentPage}</span> of <span className="font-semibold text-slate-900 dark:text-white">{totalPages}</span>
+                    </p>
+
+                    <div className="flex items-center gap-1.5">
+                      <button
+                        onClick={() => setPage(validCurrentPage - 1)}
+                        disabled={validCurrentPage <= 1}
+                        className="px-3 py-1.5 rounded-lg border border-slate-200 dark:border-slate-800 text-xs font-medium text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 disabled:opacity-40 disabled:hover:bg-transparent transition-colors flex items-center gap-1"
+                      >
+                        <ChevronLeft className="w-3.5 h-3.5" />
+                        <span>Previous</span>
+                      </button>
+
+                      {Array.from({ length: totalPages }, (_, idx) => idx + 1).map((pageNum) => {
+                        // Display sliding window of page numbers
+                        if (
+                          totalPages > 7 &&
+                          Math.abs(pageNum - validCurrentPage) > 2 &&
+                          pageNum !== 1 &&
+                          pageNum !== totalPages
+                        ) {
+                          if (pageNum === 2 || pageNum === totalPages - 1) {
+                            return (
+                              <span key={pageNum} className="px-1 text-slate-400 text-xs">
+                                …
+                              </span>
+                            );
+                          }
+                          return null;
+                        }
+
+                        return (
+                          <button
+                            key={pageNum}
+                            onClick={() => setPage(pageNum)}
+                            className={`min-w-[32px] h-8 px-2 rounded-lg text-xs font-semibold transition-colors ${
+                              validCurrentPage === pageNum
+                                ? 'bg-indigo-600 text-white shadow-xs'
+                                : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800'
+                            }`}
+                          >
+                            {pageNum}
+                          </button>
+                        );
+                      })}
+
+                      <button
+                        onClick={() => setPage(validCurrentPage + 1)}
+                        disabled={validCurrentPage >= totalPages}
+                        className="px-3 py-1.5 rounded-lg border border-slate-200 dark:border-slate-800 text-xs font-medium text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 disabled:opacity-40 disabled:hover:bg-transparent transition-colors flex items-center gap-1"
+                      >
+                        <span>Next</span>
+                        <ChevronRight className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </>
             )}
 
           </div>

@@ -4,6 +4,9 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import fs from 'fs';
 import crypto from 'crypto';
+import { GoogleGenAI } from '@google/genai';
+import { migrateDatabase } from './server/coursesMigration';
+import { ChatSession, ChatMessage } from './server/types';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -152,6 +155,8 @@ export interface DatabaseState {
   quizQuestions: QuizQuestion[];
   quizAttempts: QuizAttempt[];
   notes: LessonNote[];
+  chatSessions: ChatSession[];
+  chatMessages: ChatMessage[];
 }
 
 const DATA_DIR = path.resolve(__dirname, 'data');
@@ -750,7 +755,7 @@ function getInitialSeedData(): DatabaseState {
     }
   ];
 
-  return {
+  const seedState: DatabaseState = {
     users,
     profiles,
     userRoles,
@@ -764,8 +769,12 @@ function getInitialSeedData(): DatabaseState {
     quizzes,
     quizQuestions,
     quizAttempts,
-    notes
+    notes,
+    chatSessions: [],
+    chatMessages: []
   };
+  migrateDatabase(seedState);
+  return seedState;
 }
 
 // Database Manager
@@ -783,7 +792,12 @@ class DatabaseManager {
       }
       if (fs.existsSync(DB_FILE)) {
         const raw = fs.readFileSync(DB_FILE, 'utf-8');
-        return JSON.parse(raw);
+        const parsed = JSON.parse(raw);
+        const changed = migrateDatabase(parsed);
+        if (changed) {
+          this.persist(parsed);
+        }
+        return parsed;
       }
     } catch (e) {
       console.warn('Could not read existing DB file, initializing fresh seed:', e);
@@ -2100,6 +2114,234 @@ async function startServer() {
   app.post('/api/admin/reset-database', requireAuth, requireRole('admin'), (req: Request, res: Response) => {
     db.resetToSeed();
     return res.json({ success: true, message: 'Database reset to initial verified seed state.' });
+  });
+
+  // -------------------------------------------------------------
+  // AI TUTOR CHATBOT API (Ask LearnHub AI)
+  // -------------------------------------------------------------
+
+  // Initialize Gemini AI Client (Server-side)
+  const ai = new GoogleGenAI({
+    apiKey: process.env.GEMINI_API_KEY,
+    httpOptions: {
+      headers: {
+        'User-Agent': 'aistudio-build'
+      }
+    }
+  });
+
+  // Hourly Rate Limit Tracker: 20 messages per user per hour
+  const userMessageTimestamps = new Map<string, number[]>();
+
+  function checkRateLimit(userId: string): boolean {
+    const now = Date.now();
+    const windowMs = 60 * 60 * 1000; // 1 hour
+    const timestamps = (userMessageTimestamps.get(userId) || []).filter(t => now - t < windowMs);
+    if (timestamps.length >= 20) {
+      userMessageTimestamps.set(userId, timestamps);
+      return false;
+    }
+    timestamps.push(now);
+    userMessageTimestamps.set(userId, timestamps);
+    return true;
+  }
+
+  app.get('/api/chat/sessions', requireAuth, (req: Request, res: Response) => {
+    const userId = (req as any).userId;
+    const state = db.getState();
+    const sessions = (state.chatSessions || [])
+      .filter(s => s.userId === userId)
+      .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+    return res.json(sessions);
+  });
+
+  app.post('/api/chat/sessions', requireAuth, (req: Request, res: Response) => {
+    const userId = (req as any).userId;
+    const { title, courseId } = req.body;
+    const state = db.getState();
+    const newSession: ChatSession = {
+      id: `session-${crypto.randomUUID()}`,
+      userId,
+      courseId: courseId || null,
+      title: title || 'New Learning Chat',
+      createdAt: new Date().toISOString()
+    };
+    state.chatSessions.push(newSession);
+    db.save();
+    return res.status(201).json(newSession);
+  });
+
+  app.get('/api/chat/sessions/:id/messages', requireAuth, (req: Request, res: Response) => {
+    const userId = (req as any).userId;
+    const { id } = req.params;
+    const state = db.getState();
+    const session = (state.chatSessions || []).find(s => s.id === id);
+    if (!session) return res.status(404).json({ error: 'Chat session not found.' });
+    if (session.userId !== userId) return res.status(403).json({ error: 'Unauthorized to view this chat.' });
+
+    const messages = (state.chatMessages || [])
+      .filter(m => m.sessionId === id)
+      .sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
+    return res.json({ session, messages });
+  });
+
+  app.put('/api/chat/sessions/:id', requireAuth, (req: Request, res: Response) => {
+    const userId = (req as any).userId;
+    const { id } = req.params;
+    const { title } = req.body;
+    const state = db.getState();
+    const session = (state.chatSessions || []).find(s => s.id === id);
+    if (!session) return res.status(404).json({ error: 'Chat session not found.' });
+    if (session.userId !== userId) return res.status(403).json({ error: 'Unauthorized.' });
+
+    session.title = title || session.title;
+    db.save();
+    return res.json(session);
+  });
+
+  app.delete('/api/chat/sessions/:id', requireAuth, (req: Request, res: Response) => {
+    const userId = (req as any).userId;
+    const { id } = req.params;
+    const state = db.getState();
+    const session = (state.chatSessions || []).find(s => s.id === id);
+    if (!session) return res.status(404).json({ error: 'Chat session not found.' });
+    if (session.userId !== userId) return res.status(403).json({ error: 'Unauthorized.' });
+
+    state.chatSessions = state.chatSessions.filter(s => s.id !== id);
+    state.chatMessages = state.chatMessages.filter(m => m.sessionId !== id);
+    db.save();
+    return res.json({ success: true, message: 'Chat deleted.' });
+  });
+
+  // Edge Function: ai-tutor (Streaming token by token via SSE)
+  app.post('/api/chat/stream', requireAuth, async (req: Request, res: Response) => {
+    const userId = (req as any).userId;
+    const { messages, courseId, lessonId, sessionId } = req.body;
+
+    if (!Array.isArray(messages) || messages.length === 0) {
+      return res.status(400).json({ error: 'Messages array is required.' });
+    }
+
+    // Rate Limit Verification: 20 messages per user per hour
+    if (!checkRateLimit(userId)) {
+      return res.status(429).json({
+        error: 'Hourly rate limit reached. You can send up to 20 messages per hour. Please wait a bit before asking again.'
+      });
+    }
+
+    const state = db.getState();
+
+    // Ensure session exists or create one
+    let targetSession = sessionId ? state.chatSessions.find(s => s.id === sessionId && s.userId === userId) : null;
+    if (!targetSession) {
+      const firstUserMsg = messages.find((m: any) => m.role === 'user')?.content || 'Learning Chat';
+      const cleanTitle = firstUserMsg.slice(0, 36) + (firstUserMsg.length > 36 ? '...' : '');
+      targetSession = {
+        id: `session-${crypto.randomUUID()}`,
+        userId,
+        courseId: courseId || null,
+        title: cleanTitle,
+        createdAt: new Date().toISOString()
+      };
+      state.chatSessions.push(targetSession);
+      db.save();
+    }
+
+    // Persist incoming latest user message
+    const latestUserMsg = messages[messages.length - 1];
+    if (latestUserMsg && latestUserMsg.role === 'user') {
+      state.chatMessages.push({
+        id: `msg-${crypto.randomUUID()}`,
+        sessionId: targetSession.id,
+        role: 'user',
+        content: latestUserMsg.content,
+        createdAt: new Date().toISOString()
+      });
+      db.save();
+    }
+
+    // Dynamic Context Injection from Database
+    let contextNote = '';
+    if (courseId) {
+      const crs = state.courses.find(c => c.id === courseId || c.slug === courseId);
+      if (crs) {
+        contextNote += `\n\nCURRENT COURSE CONTEXT:\nTitle: ${crs.title}\nLevel: ${crs.level}\nSummary: ${crs.shortDescription || crs.description}`;
+        if (lessonId) {
+          const les = state.lessons.find(l => l.id === lessonId);
+          if (les) {
+            contextNote += `\nCURRENT LESSON CONTEXT:\nLesson Title: ${les.title}\nDuration: ${les.durationMinutes} mins`;
+          }
+        }
+      }
+    }
+
+    const systemPrompt = `You are LearnHub AI, a friendly tutor. Explain concepts step by step in simple language with short examples. Use code blocks only when relevant. If the user writes in Hinglish or Hindi, reply in the same style. Prefer answering about the current course/lesson. For unrelated or harmful requests, politely redirect to learning topics. If you are unsure, say so instead of guessing.${contextNote}`;
+
+    // Set headers for SSE
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Connection', 'keep-alive');
+    res.setHeader('X-Accel-Buffering', 'no');
+    res.flushHeaders?.();
+
+    // Send initial session announcement
+    res.write(`data: ${JSON.stringify({ type: 'session', sessionId: targetSession.id, title: targetSession.title })}\n\n`);
+
+    try {
+      // Map user/assistant messages to Gemini format
+      const formattedContents = messages.map((m: any) => ({
+        role: m.role === 'assistant' ? 'model' : 'user',
+        parts: [{ text: m.content }]
+      }));
+
+      const streamResponse = await ai.models.generateContentStream({
+        model: 'gemini-3.8-flash',
+        contents: formattedContents,
+        config: {
+          systemInstruction: systemPrompt
+        }
+      });
+
+      let fullAssistantText = '';
+
+      for await (const chunk of streamResponse) {
+        const text = chunk.text || '';
+        if (text) {
+          fullAssistantText += text;
+          res.write(`data: ${JSON.stringify({ type: 'chunk', text })}\n\n`);
+        }
+      }
+
+      // Save assistant message to database
+      if (fullAssistantText.trim()) {
+        state.chatMessages.push({
+          id: `msg-${crypto.randomUUID()}`,
+          sessionId: targetSession.id,
+          role: 'assistant',
+          content: fullAssistantText,
+          createdAt: new Date().toISOString()
+        });
+        db.save();
+      }
+
+      res.write(`data: ${JSON.stringify({ type: 'done', fullText: fullAssistantText })}\n\n`);
+      res.write('data: [DONE]\n\n');
+      res.end();
+    } catch (err: any) {
+      console.error('Gemini stream error:', err);
+      const isRateLimit = err?.status === 429 || err?.message?.includes('429') || err?.message?.includes('RESOURCE_EXHAUSTED');
+      const isCreditExhausted = err?.status === 402 || err?.message?.includes('402');
+
+      const userFriendlyMsg = isRateLimit
+        ? 'High traffic limit reached on the AI tutor. Please pause for a moment and try again.'
+        : isCreditExhausted
+        ? 'AI credit quota reached. Please try again later.'
+        : 'LearnHub AI encountered a temporary connection issue. Please retry your question.';
+
+      res.write(`data: ${JSON.stringify({ type: 'error', error: userFriendlyMsg, status: isRateLimit ? 429 : isCreditExhausted ? 402 : 500 })}\n\n`);
+      res.write('data: [DONE]\n\n');
+      res.end();
+    }
   });
 
   // -------------------------------------------------------------

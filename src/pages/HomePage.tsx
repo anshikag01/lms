@@ -21,7 +21,13 @@ import {
   Smartphone,
   Layers,
   Sparkles,
-  Play
+  Play,
+  Briefcase,
+  CircleDollarSign,
+  Languages,
+  HeartPulse,
+  TrendingUp,
+  Award
 } from 'lucide-react';
 
 const categoryIconMap: Record<string, React.ReactNode> = {
@@ -32,7 +38,12 @@ const categoryIconMap: Record<string, React.ReactNode> = {
   ShieldCheck: <ShieldCheck className="w-5 h-5" />,
   BarChart3: <BarChart3 className="w-5 h-5" />,
   Smartphone: <Smartphone className="w-5 h-5" />,
-  Layers: <Layers className="w-5 h-5" />
+  Layers: <Layers className="w-5 h-5" />,
+  Briefcase: <Briefcase className="w-5 h-5" />,
+  CircleDollarSign: <CircleDollarSign className="w-5 h-5" />,
+  Languages: <Languages className="w-5 h-5" />,
+  HeartPulse: <HeartPulse className="w-5 h-5" />,
+  GraduationCap: <GraduationCap className="w-5 h-5" />
 };
 
 export const HomePage: React.FC = () => {
@@ -81,6 +92,24 @@ export const HomePage: React.FC = () => {
     // Default: featured
     return courses.slice(0, 4);
   }, [courses, activeTab]);
+
+  // Curated Row 1: Popular in Business & Finance
+  const businessCourses = React.useMemo(() => {
+    if (!courses) return [];
+    return courses.filter(c => c.categoryId === 'cat-biz' || c.categoryId === 'cat-fin').slice(0, 4);
+  }, [courses]);
+
+  // Curated Row 2: Learn a New Skill (Design, Language, Personal Dev)
+  const skillCourses = React.useMemo(() => {
+    if (!courses) return [];
+    return courses.filter(c => c.categoryId === 'cat-des' || c.categoryId === 'cat-lang' || c.categoryId === 'cat-pdev').slice(0, 4);
+  }, [courses]);
+
+  // Curated Row 3: Exam Prep & Academics
+  const examCourses = React.useMemo(() => {
+    if (!courses) return [];
+    return courses.filter(c => c.categoryId === 'cat-exam').slice(0, 4);
+  }, [courses]);
 
   return (
     <div className="flex flex-col min-h-screen">
@@ -378,6 +407,120 @@ export const HomePage: React.FC = () => {
             </Link>
           </div>
 
+        </div>
+      </section>
+
+      {/* CURATED ROW 1: POPULAR IN BUSINESS */}
+      <section className="py-16 bg-slate-50 dark:bg-slate-950 border-t border-slate-200 dark:border-slate-800">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+          <div className="flex flex-col sm:flex-row sm:items-end justify-between mb-8">
+            <div>
+              <div className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-emerald-100 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300 text-xs font-semibold mb-2">
+                <Briefcase className="w-3.5 h-3.5" />
+                <span>Entrepreneurship & Wealth</span>
+              </div>
+              <h2 className="text-2xl sm:text-3xl font-bold text-slate-900 dark:text-white">
+                Popular in Business
+              </h2>
+              <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                Startup fundamentals, digital marketing, personal finance, and corporate modeling
+              </p>
+            </div>
+            <Link
+              to="/courses?category=cat-biz"
+              className="mt-3 sm:mt-0 text-xs font-semibold text-indigo-600 dark:text-indigo-400 hover:text-indigo-700 flex items-center gap-1"
+            >
+              Explore Business Tracks <ArrowRight className="w-3.5 h-3.5" />
+            </Link>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
+            {isCoursesLoading ? (
+              Array.from({ length: 4 }).map((_, i) => <CourseCardSkeleton key={i} />)
+            ) : businessCourses.length > 0 ? (
+              businessCourses.map((c) => <CourseCard key={c.id} course={c} />)
+            ) : (
+              <div className="col-span-4 text-center py-8 text-slate-500 text-xs">
+                Courses updating...
+              </div>
+            )}
+          </div>
+        </div>
+      </section>
+
+      {/* CURATED ROW 2: LEARN A NEW SKILL */}
+      <section className="py-16 bg-white dark:bg-slate-900 border-t border-slate-200 dark:border-slate-800">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+          <div className="flex flex-col sm:flex-row sm:items-end justify-between mb-8">
+            <div>
+              <div className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-violet-100 dark:bg-violet-950/60 text-violet-700 dark:text-violet-300 text-xs font-semibold mb-2">
+                <Palette className="w-3.5 h-3.5" />
+                <span>Creative & Communications</span>
+              </div>
+              <h2 className="text-2xl sm:text-3xl font-bold text-slate-900 dark:text-white">
+                Learn a New Skill
+              </h2>
+              <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                Design, video editing, spoken English fluency, public speaking, and productivity
+              </p>
+            </div>
+            <Link
+              to="/courses?category=cat-des"
+              className="mt-3 sm:mt-0 text-xs font-semibold text-indigo-600 dark:text-indigo-400 hover:text-indigo-700 flex items-center gap-1"
+            >
+              Explore Skill Tracks <ArrowRight className="w-3.5 h-3.5" />
+            </Link>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
+            {isCoursesLoading ? (
+              Array.from({ length: 4 }).map((_, i) => <CourseCardSkeleton key={i} />)
+            ) : skillCourses.length > 0 ? (
+              skillCourses.map((c) => <CourseCard key={c.id} course={c} />)
+            ) : (
+              <div className="col-span-4 text-center py-8 text-slate-500 text-xs">
+                Courses updating...
+              </div>
+            )}
+          </div>
+        </div>
+      </section>
+
+      {/* CURATED ROW 3: EXAM PREP */}
+      <section className="py-16 bg-slate-50 dark:bg-slate-950 border-t border-slate-200 dark:border-slate-800">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+          <div className="flex flex-col sm:flex-row sm:items-end justify-between mb-8">
+            <div>
+              <div className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-amber-100 dark:bg-amber-950/60 text-amber-800 dark:text-amber-300 text-xs font-semibold mb-2">
+                <GraduationCap className="w-3.5 h-3.5" />
+                <span>Competitive Exams & Core Academics</span>
+              </div>
+              <h2 className="text-2xl sm:text-3xl font-bold text-slate-900 dark:text-white">
+                Exam Prep
+              </h2>
+              <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                Quantitative aptitude, competitive logical reasoning, and advanced science fundamentals
+              </p>
+            </div>
+            <Link
+              to="/courses?category=cat-exam"
+              className="mt-3 sm:mt-0 text-xs font-semibold text-indigo-600 dark:text-indigo-400 hover:text-indigo-700 flex items-center gap-1"
+            >
+              Explore Exam Prep <ArrowRight className="w-3.5 h-3.5" />
+            </Link>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
+            {isCoursesLoading ? (
+              Array.from({ length: 4 }).map((_, i) => <CourseCardSkeleton key={i} />)
+            ) : examCourses.length > 0 ? (
+              examCourses.map((c) => <CourseCard key={c.id} course={c} />)
+            ) : (
+              <div className="col-span-4 text-center py-8 text-slate-500 text-xs">
+                Courses updating...
+              </div>
+            )}
+          </div>
         </div>
       </section>
 

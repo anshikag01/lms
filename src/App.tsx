@@ -8,6 +8,7 @@ import { Role } from './types';
 // Layout Components
 import { Navbar } from './components/Navbar';
 import { Footer } from './components/Footer';
+import { ChatBot } from './components/ChatBot';
 
 // Pages
 import { HomePage } from './pages/HomePage';
@@ -189,6 +190,7 @@ export default function App() {
               <Route path="*" element={<StandardLayout><NotFoundPage /></StandardLayout>} />
 
             </Routes>
+            <ChatBot />
           </BrowserRouter>
         </AuthProvider>
       </ThemeProvider>

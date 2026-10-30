@@ -1,4 +1,4 @@
-import { Course, Category, Profile, Role, EnrolledCourseItem, Review, QuizAttempt, CertificateData } from '../types';
+import { Course, Category, Profile, Role, EnrolledCourseItem, Review, QuizAttempt, CertificateData, ChatSession, ChatMessage } from '../types';
 
 const TOKEN_KEY = 'learnhub_auth_token';
 
@@ -264,5 +264,137 @@ export const api = {
   resetDatabase: () =>
     fetchApi<{ success: boolean; message: string }>('/api/admin/reset-database', {
       method: 'POST'
+    }),
+
+  // AI Chat
+  getChatSessions: () =>
+    fetchApi<ChatSession[]>('/api/chat/sessions'),
+
+  createChatSession: (payload?: { title?: string; courseId?: string }) =>
+    fetchApi<ChatSession>('/api/chat/sessions', {
+      method: 'POST',
+      body: JSON.stringify(payload || {})
+    }),
+
+  getSessionMessages: (sessionId: string) =>
+    fetchApi<ChatMessage[]>(`/api/chat/sessions/${sessionId}/messages`),
+
+  renameChatSession: (sessionId: string, title: string) =>
+    fetchApi<ChatSession>(`/api/chat/sessions/${sessionId}`, {
+      method: 'PUT',
+      body: JSON.stringify({ title })
+    }),
+
+  deleteChatSession: (sessionId: string) =>
+    fetchApi<{ success: boolean }>(`/api/chat/sessions/${sessionId}`, {
+      method: 'DELETE'
     })
 };
+
+export async function streamChatResponse(params: {
+  sessionId?: string;
+  message: string;
+  courseId?: string;
+  lessonId?: string;
+  onSessionCreated?: (sessionId: string) => void;
+  onChunk: (chunk: string) => void;
+  onComplete?: (fullContent: string) => void;
+  onError?: (err: Error) => void;
+  signal?: AbortSignal;
+}): Promise<void> {
+  const token = getStoredToken();
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json'
+  };
+  if (token) {
+    headers['Authorization'] = `Bearer ${token}`;
+  }
+
+  const response = await fetch('/api/chat/stream', {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({
+      sessionId: params.sessionId,
+      message: params.message,
+      courseId: params.courseId,
+      lessonId: params.lessonId
+    }),
+    signal: params.signal
+  });
+
+  if (!response.ok) {
+    let errorMsg = `Server error ${response.status}`;
+    try {
+      const errJson = await response.json();
+      if (errJson.error) errorMsg = errJson.error;
+    } catch {
+      // fallback
+    }
+    const err = new Error(errorMsg);
+    if (params.onError) params.onError(err);
+    throw err;
+  }
+
+  const reader = response.body?.getReader();
+  if (!reader) {
+    throw new Error('ReadableStream not supported');
+  }
+
+  const decoder = new TextDecoder('utf-8');
+  let buffer = '';
+  let accumulated = '';
+
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split('\n');
+      buffer = lines.pop() || '';
+
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (!trimmed || !trimmed.startsWith('data:')) continue;
+        const dataStr = trimmed.slice(5).trim();
+        if (!dataStr) continue;
+
+        try {
+          const parsed = JSON.parse(dataStr);
+          if (parsed.session_id && params.onSessionCreated) {
+            params.onSessionCreated(parsed.session_id);
+          }
+          if (parsed.chunk) {
+            accumulated += parsed.chunk;
+            params.onChunk(parsed.chunk);
+          }
+          if (parsed.error) {
+            const err = new Error(parsed.error);
+            if (params.onError) params.onError(err);
+            throw err;
+          }
+          if (parsed.done) {
+            if (params.onComplete) params.onComplete(accumulated);
+            return;
+          }
+        } catch (e: any) {
+          if (e.message && e.message.includes('API')) {
+            throw e;
+          }
+          // Non-JSON SSE line or parse error
+        }
+      }
+    }
+    if (params.onComplete) {
+      params.onComplete(accumulated);
+    }
+  } catch (err: any) {
+    if (err.name === 'AbortError') {
+      // Aborted by user
+      return;
+    }
+    if (params.onError) params.onError(err);
+    throw err;
+  }
+}
+

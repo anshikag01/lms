@@ -138,3 +138,24 @@ export interface CertificateData {
   totalDurationMinutes: number;
   totalLessons: number;
 }
+
+export interface UserRole {
+  userId: string;
+  role: Role;
+}
+
+export interface ChatSession {
+  id: string;
+  userId: string;
+  courseId: string | null;
+  title: string;
+  createdAt: string;
+}
+
+export interface ChatMessage {
+  id: string;
+  sessionId: string;
+  role: 'user' | 'assistant';
+  content: string;
+  createdAt: string;
+}
